@@ -19,11 +19,12 @@ const messageSchema = new mongoose.Schema(
           type: mongoose.Schema.Types.ObjectId,
           ref: "Material",
         },
-
+        materialName: {
+          type: String,
+        },
         page: {
           type: Number,
         },
-
         chunkId: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Chunk",

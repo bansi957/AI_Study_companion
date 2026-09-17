@@ -73,6 +73,21 @@ const materialSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    structureStats: {
+      headings: { type: Number, default: 0 },
+      paragraphs: { type: Number, default: 0 },
+      lists: { type: Number, default: 0 },
+      tables: { type: Number, default: 0 },
+      images: { type: Number, default: 0 },
+      unknown: { type: Number, default: 0 },
+      ocrPages: { type: Number, default: 0 },
+    },
+
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
   },
   {
     timestamps: true,

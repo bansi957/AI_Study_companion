@@ -3,6 +3,9 @@ const path = require("path");
 const fs = require("fs");
 const Material = require("../models/Material");
 const Project = require("../models/Project");
+const ExtractedContent = require("../models/ExtractedContent");
+const Concept = require("../models/Concept");
+const Chunk = require("../models/Chunk");
 const apiResponse = require("../utils/apiResponse");
 const { addDocumentJob } = require("../queues/document.queue");
 
@@ -23,6 +26,7 @@ const formatMaterialResponse = (m) => ({
   status: m.status,
   pageCount: m.pageCount || 0,
   extractedTextLength: m.extractedTextLength || 0,
+  structureStats: m.structureStats || {},
   processedAt: m.processedAt || null,
   processingError: m.processingError || null,
   createdAt: m.createdAt,
@@ -206,8 +210,15 @@ const deleteMaterial = async (req, res, next) => {
       return apiResponse(res, 404, "Material not found");
     }
 
-    // Delete material from database
+    // Delete material, extracted content, chunks, and unbind concepts
     await Material.findByIdAndDelete(id);
+    await ExtractedContent.deleteMany({ materialId: id });
+    await Chunk.deleteMany({ materialId: id });
+    await Concept.deleteMany({ sourceMaterialIds: [id] });
+    await Concept.updateMany(
+      { sourceMaterialIds: id },
+      { $pull: { sourceMaterialIds: id } }
+    );
 
     // Delete stored physical file if exists (gracefully handle if missing)
     if (material.filename) {
@@ -221,10 +232,168 @@ const deleteMaterial = async (req, res, next) => {
   }
 };
 
+/**
+ * Get structured extracted content for a material
+ * GET /api/materials/:id/content
+ */
+const getMaterialContent = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { page } = req.query;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return apiResponse(res, 400, "Invalid material ID");
+    }
+
+    // Verify material belongs to authenticated user
+    const material = await Material.findOne({
+      _id: id,
+      userId: req.user.userId,
+    });
+
+    if (!material) {
+      return apiResponse(res, 404, "Material not found");
+    }
+
+    // Strict project isolation verification
+    const project = await Project.findOne({
+      _id: material.projectId,
+      userId: req.user.userId,
+    });
+
+    if (!project) {
+      return apiResponse(res, 404, "Project not found");
+    }
+
+    // Build query with isolation filters
+    const query = {
+      materialId: id,
+      projectId: material.projectId,
+      userId: req.user.userId,
+    };
+
+    if (page) {
+      const pageNum = parseInt(page, 10);
+      if (!isNaN(pageNum) && pageNum > 0) {
+        query.pageNumber = pageNum;
+      }
+    }
+
+    const segments = await ExtractedContent.find(query)
+      .sort({ pageNumber: 1, segmentIndex: 1 })
+      .select("-__v");
+
+    return apiResponse(res, 200, "Extracted content retrieved successfully", {
+      materialId: id,
+      projectId: material.projectId,
+      pageCount: material.pageCount,
+      totalSegments: segments.length,
+      structureStats: material.structureStats || {},
+      segments,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Get extracted concepts for a material
+ * GET /api/materials/:id/concepts
+ */
+const getMaterialConcepts = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return apiResponse(res, 400, "Invalid material ID");
+    }
+
+    const material = await Material.findOne({
+      _id: id,
+      userId: req.user.userId,
+    });
+
+    if (!material) {
+      return apiResponse(res, 404, "Material not found");
+    }
+
+    const concepts = await Concept.find({
+      projectId: material.projectId,
+      sourceMaterialIds: id,
+    })
+      .sort({ importance: -1, name: 1 })
+      .select("-__v");
+
+    return apiResponse(res, 200, "Concepts retrieved successfully", {
+      materialId: id,
+      projectId: material.projectId,
+      count: concepts.length,
+      concepts,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Get chunks for a material with pagination and page filtering
+ * GET /api/materials/:id/chunks
+ */
+const getMaterialChunks = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { page, limit = 50 } = req.query;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return apiResponse(res, 400, "Invalid material ID");
+    }
+
+    const material = await Material.findOne({
+      _id: id,
+      userId: req.user.userId,
+    });
+
+    if (!material) {
+      return apiResponse(res, 404, "Material not found");
+    }
+
+    const query = {
+      materialId: id,
+      projectId: material.projectId,
+      userId: req.user.userId,
+    };
+
+    if (page) {
+      const pageNum = parseInt(page, 10);
+      if (!isNaN(pageNum) && pageNum > 0) {
+        query.pages = pageNum;
+      }
+    }
+
+    const chunks = await Chunk.find(query)
+      .sort({ chunkIndex: 1 })
+      .limit(parseInt(limit, 10) || 50)
+      .select("-__v");
+
+    return apiResponse(res, 200, "Chunks retrieved successfully", {
+      materialId: id,
+      projectId: material.projectId,
+      count: chunks.length,
+      chunks,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   uploadMaterial,
   getMaterialsByProject,
   getMaterialById,
   deleteMaterial,
+  getMaterialContent,
+  getMaterialConcepts,
+  getMaterialChunks,
 };
+
 

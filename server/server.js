@@ -17,17 +17,23 @@ const projectRoutes = require("./routes/project.routes");
 const materialRoutes = require("./routes/material.routes");
 const tutorRoutes = require("./routes/tutor.routes");
 const quizRoutes = require("./routes/quiz.routes");
+const assessmentRoutes = require("./routes/assessment.routes");
 const masteryRoutes = require("./routes/mastery.routes");
 const growthRoutes = require("./routes/growth.routes");
 const recommendationRoutes = require("./routes/recommendation.routes");
 const analyticsRoutes = require("./routes/analytics.routes");
 const adminRoutes = require("./routes/admin.routes");
+const retrievalRoutes = require("./routes/retrieval.routes");
+const retrievalService = require("./services/retrieval/retrieval.service");
 
 const app = express();
 
 
 // Database
-connectDB();
+connectDB().then(() => {
+  // Non-blocking initialization of Atlas Vector Search index (does not hold up server startup)
+  retrievalService.ensureVectorIndex().catch(() => {});
+});
 
 // Middleware
 app.use(express.json());
@@ -51,11 +57,15 @@ app.use("/api/projects", projectRoutes);
 app.use("/api/materials", materialRoutes);
 app.use("/api/tutor", tutorRoutes);
 app.use("/api/quiz", quizRoutes);
+app.use("/api/quizzes", quizRoutes);
+app.use("/api/assessment", assessmentRoutes);
+app.use("/api/assessments", assessmentRoutes);
 app.use("/api/mastery", masteryRoutes);
 app.use("/api/growth", growthRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/retrieval", retrievalRoutes);
 
 app.use(errorMiddleware);
 

@@ -4,6 +4,7 @@ const Material = require("../models/Material");
 const Project = require("../models/Project");
 const Chunk = require("../models/Chunk");
 const Concept = require("../models/Concept");
+const ExtractedContent = require("../models/ExtractedContent");
 const extractionService = require("../services/documents/extraction.service");
 const knowledgeService = require("../services/documents/knowledge.service");
 const retrievalService = require("../services/documents/retrieval.service");
@@ -54,8 +55,10 @@ const processDocument = async (job) => {
     throw new Error(`Project ${projectId} not found`);
   }
 
-  // 2. Enforce Idempotency: Clean up any existing derived chunks or concepts before rerun
+  // 2. Enforce Idempotency: Clean up any existing derived content, chunks, or concepts before rerun
+  await ExtractedContent.deleteMany({ materialId });
   await Chunk.deleteMany({ materialId });
+  await Concept.deleteMany({ sourceMaterialIds: [materialId] });
   await Concept.updateMany(
     { sourceMaterialIds: materialId },
     { $pull: { sourceMaterialIds: materialId } }
@@ -73,19 +76,28 @@ const processDocument = async (job) => {
       userId: material.userId.toString(),
     };
 
-    // Stage 1: Content & Structure Extraction (page provenance preserved)
-    const extractedContent = await extractionService.extract(material);
+    // Stage 1: Content & Structure Extraction (page provenance preserved & persisted)
+    const extractedContent = await extractionService.extract(material, context);
 
-    // Stage 2: Knowledge Extraction (contract stub for future AI analysis)
+    // Stage 2: Knowledge Extraction (concepts, topics, and relationships)
     const knowledge = await knowledgeService.extract(extractedContent, context);
 
     // Stage 3: Retrieval Representation (contract stub for future chunking & vectors)
     const retrievalData = await retrievalService.prepare(extractedContent, knowledge, context);
 
-    // 4. Update status to READY with document statistics
+    // 4. Update status to READY with document statistics and structure stats
     material.status = "READY";
     material.pageCount = extractedContent.totalPages || 0;
     material.extractedTextLength = extractedContent.totalCharacters || 0;
+    material.structureStats = extractedContent.stats || {};
+    material.metadata = {
+      ...(material.metadata || {}),
+      ...(extractedContent.metadata || {}),
+      conceptsCount: knowledge?.conceptsCount || 0,
+      chunksCount: retrievalData?.chunksCount || 0,
+      embeddedChunksCount: retrievalData?.embeddedCount || 0,
+      embeddingDimension: retrievalData?.embeddingDimension || null,
+    };
     material.processedAt = new Date();
     material.processingError = null;
     await material.save();
@@ -95,6 +107,11 @@ const processDocument = async (job) => {
       materialId: material._id,
       pageCount: material.pageCount,
       extractedTextLength: material.extractedTextLength,
+      totalSegments: extractedContent.totalSegments,
+      structureStats: material.structureStats,
+      conceptsCount: knowledge?.conceptsCount || 0,
+      chunksCount: retrievalData?.chunksCount || 0,
+      embeddedChunksCount: retrievalData?.embeddedCount || 0,
     };
   } catch (error) {
     // Stage failure: transition to FAILED and record safe error
