@@ -42,6 +42,18 @@ const createProject = async (req, res, next) => {
       status: status || "active",
     });
 
+    const activityService = require("../services/analytics/activity.service");
+    await activityService.recordActivity({
+      userId: req.user.userId,
+      projectId: newProject._id,
+      type: "PROJECT_CREATED",
+      metadata: {
+        projectId: newProject._id,
+        name: newProject.name,
+        learningGoal: newProject.learningGoal,
+      },
+    });
+
     return apiResponse(res, 201, "Project created successfully", {
       project: newProject,
     });

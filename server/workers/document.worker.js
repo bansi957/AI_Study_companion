@@ -102,6 +102,19 @@ const processDocument = async (job) => {
     material.processingError = null;
     await material.save();
 
+    const activityService = require("../services/analytics/activity.service");
+    await activityService.recordActivity({
+      userId: material.userId,
+      projectId: material.projectId,
+      type: "MATERIAL_PROCESSED",
+      metadata: {
+        materialId: material._id,
+        filename: material.originalName,
+        conceptsCount: knowledge?.conceptsCount || 0,
+        chunksCount: retrievalData?.chunksCount || 0,
+      },
+    });
+
     return {
       success: true,
       materialId: material._id,

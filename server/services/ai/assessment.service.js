@@ -6,6 +6,7 @@ const Project = require("../../models/Project");
 const AIUsage = require("../../models/AIUsage");
 const retrievalService = require("../retrieval/retrieval.service");
 const masteryService = require("../learning/mastery.service");
+const activityService = require("../analytics/activity.service");
 const llmService = require("./llm.service");
 
 /**
@@ -423,6 +424,17 @@ Return strictly a valid JSON object with the following schema:
     assessment.submittedAt = new Date();
     assessment.evaluatedAt = new Date();
     await assessment.save();
+
+    await activityService.recordActivity({
+      userId,
+      projectId: assessment.projectId,
+      type: "ASSESSMENT_COMPLETED",
+      metadata: {
+        assessmentId: assessment._id,
+        conceptId: assessment.conceptId,
+        score: evaluation ? evaluation.score : null,
+      },
+    });
 
     // 7. Record Mastery Evidence from Assessment
     if (assessment.conceptId && evaluation && typeof evaluation.score === "number") {

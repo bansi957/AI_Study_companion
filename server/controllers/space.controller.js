@@ -22,6 +22,16 @@ const createSpace = async (req, res, next) => {
       icon: icon ? icon.trim() : undefined,
     });
 
+    const activityService = require("../services/analytics/activity.service");
+    await activityService.recordActivity({
+      userId: req.user.userId,
+      type: "SPACE_CREATED",
+      metadata: {
+        spaceId: newSpace._id,
+        name: newSpace.name,
+      },
+    });
+
     return apiResponse(res, 201, "Space created successfully", {
       space: newSpace,
     });

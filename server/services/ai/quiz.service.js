@@ -7,6 +7,7 @@ const Project = require("../../models/Project");
 const AIUsage = require("../../models/AIUsage");
 const retrievalService = require("../retrieval/retrieval.service");
 const masteryService = require("../learning/mastery.service");
+const activityService = require("../analytics/activity.service");
 const llmService = require("./llm.service");
 
 /**
@@ -420,6 +421,18 @@ Return strictly a valid JSON object with the following schema:
     });
 
     await attempt.save();
+
+    await activityService.recordActivity({
+      userId,
+      projectId: quiz.projectId,
+      type: "QUIZ_STARTED",
+      metadata: {
+        quizId: quiz._id,
+        attemptId: attempt._id,
+        totalQuestions: quiz.questions ? quiz.questions.length : quiz.totalQuestions,
+      },
+    });
+
     return attempt;
   }
 
@@ -518,6 +531,19 @@ Return strictly a valid JSON object with the following schema:
     }
 
     await attempt.save();
+
+    await activityService.recordActivity({
+      userId,
+      projectId: quiz.projectId,
+      type: "QUESTION_ANSWERED",
+      metadata: {
+        quizId: quiz._id,
+        attemptId: attempt._id,
+        questionId: question._id,
+        conceptId: question.conceptId,
+        isCorrect,
+      },
+    });
 
     return {
       isCorrect,
@@ -665,6 +691,19 @@ Return strictly a valid JSON object with the following schema:
       conceptsWithIncorrectAnswers: Array.from(incorrectConceptsMap.values()),
       questionBreakdown,
     };
+
+    await activityService.recordActivity({
+      userId,
+      projectId: quiz.projectId,
+      type: "QUIZ_COMPLETED",
+      metadata: {
+        quizId: quiz._id,
+        attemptId: attempt._id,
+        score: totalScorePercentage,
+        correctCount,
+        totalQuestions,
+      },
+    });
 
     return feedback;
   }

@@ -8,6 +8,8 @@ const Concept = require("../models/Concept");
 const Chunk = require("../models/Chunk");
 const apiResponse = require("../utils/apiResponse");
 const { addDocumentJob } = require("../queues/document.queue");
+const activityService = require("../services/analytics/activity.service");
+const { cloudinary, isCloudinaryConfigured } = require("../config/cloudinary");
 
 const uploadDir = path.join(__dirname, "../uploads");
 
@@ -21,6 +23,7 @@ const formatMaterialResponse = (m) => ({
   projectId: m.projectId,
   originalName: m.originalName,
   fileUrl: m.fileUrl,
+  cloudinaryPublicId: m.cloudinaryPublicId || null,
   fileType: m.fileType,
   fileSize: m.fileSize,
   status: m.status,
@@ -65,19 +68,58 @@ const uploadMaterial = async (req, res, next) => {
       return apiResponse(res, 404, "Project not found");
     }
 
-    // 4. Create Material document with QUEUED status
+    // 4. Upload PDF to Cloudinary (or local fallback if not yet configured)
+    let fileUrl;
+    let cloudinaryPublicId = null;
+    let cloudinaryResourceType = "raw";
+    let cloudinaryMetadata = null;
+    let fileSize = req.file.size;
+
+    if (isCloudinaryConfigured()) {
+      const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
+        folder: `ai-study-companion/projects/${projectId}/materials`,
+        resource_type: "raw",
+        public_id: `${uniqueSuffix}`,
+        use_filename: true,
+      });
+
+      fileUrl = uploadResult.secure_url;
+      cloudinaryPublicId = uploadResult.public_id;
+      cloudinaryResourceType = uploadResult.resource_type || "raw";
+      fileSize = uploadResult.bytes || req.file.size;
+      cloudinaryMetadata = {
+        publicId: uploadResult.public_id,
+        secureUrl: uploadResult.secure_url,
+        resourceType: uploadResult.resource_type,
+        format: uploadResult.format,
+        bytes: uploadResult.bytes,
+      };
+
+      // Remove the local temporary file immediately so no permanent files remain in uploads/
+      await fs.promises.unlink(req.file.path).catch(() => {});
+    } else {
+      fileUrl = `/uploads/${req.file.filename}`;
+    }
+
+    // 5. Create Material document with QUEUED status
     const material = await Material.create({
       userId: req.user.userId,
       projectId,
       filename: req.file.filename,
       originalName: req.file.originalname,
-      fileUrl: `/uploads/${req.file.filename}`,
+      fileUrl,
+      cloudinaryPublicId,
+      cloudinaryResourceType,
       fileType: "application/pdf",
-      fileSize: req.file.size,
+      fileSize,
       status: "QUEUED",
+      metadata: {
+        ...(cloudinaryMetadata ? { cloudinary: cloudinaryMetadata } : {}),
+      },
     });
 
-    // 5. Enqueue background document processing job
+    // 6. Enqueue background document processing job
     try {
       await addDocumentJob({
         materialId: material._id.toString(),
@@ -87,7 +129,19 @@ const uploadMaterial = async (req, res, next) => {
       console.warn(`[MaterialController] Failed to enqueue background job: ${queueError.message}`);
     }
 
-    // 6. Return success response with sanitized metadata
+    // 7. Record activity
+    await activityService.recordActivity({
+      userId: req.user.userId,
+      projectId: material.projectId,
+      type: "MATERIAL_UPLOADED",
+      metadata: {
+        materialId: material._id,
+        filename: material.originalName,
+        size: material.fileSize,
+      },
+    });
+
+    // 8. Return success response with sanitized metadata
     return apiResponse(res, 201, "PDF uploaded successfully", {
       material: formatMaterialResponse(material),
     });
@@ -220,7 +274,19 @@ const deleteMaterial = async (req, res, next) => {
       { $pull: { sourceMaterialIds: id } }
     );
 
-    // Delete stored physical file if exists (gracefully handle if missing)
+    // Delete from Cloudinary if stored in Cloudinary
+    if (material.cloudinaryPublicId && isCloudinaryConfigured()) {
+      try {
+        const resourceType = material.cloudinaryResourceType || "raw";
+        await cloudinary.uploader.destroy(material.cloudinaryPublicId, {
+          resource_type: resourceType,
+        });
+      } catch (cloudErr) {
+        console.warn(`[MaterialController] Failed to delete Cloudinary asset ${material.cloudinaryPublicId}: ${cloudErr.message}`);
+      }
+    }
+
+    // Delete stored physical file if legacy local file exists (gracefully handle if missing)
     if (material.filename) {
       const filePath = path.join(uploadDir, material.filename);
       await fs.promises.unlink(filePath).catch(() => {});

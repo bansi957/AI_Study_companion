@@ -110,7 +110,7 @@ class RetrievalService {
     queryEmbedding,
     topK = this.defaultTopK,
     materialId = null,
-    allowDevFallback = false,
+    allowDevFallback = true,
   }) {
     if (!projectId) {
       throw new Error("Missing required projectId for vector search");
@@ -264,7 +264,7 @@ class RetrievalService {
     query,
     topK = this.defaultTopK,
     materialId = null,
-    allowDevFallback = false,
+    allowDevFallback = true,
   }) {
     if (!projectId || !mongoose.Types.ObjectId.isValid(projectId)) {
       const err = new Error("Invalid or missing project ID");

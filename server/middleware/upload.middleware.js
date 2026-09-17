@@ -10,7 +10,9 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Storage configuration
+// Storage configuration:
+// Acts as ephemeral staging for multipart streams before uploading to Cloudinary.
+// Uploaded files are immediately deleted once transmitted to Cloudinary.
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);

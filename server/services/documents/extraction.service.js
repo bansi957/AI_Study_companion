@@ -28,8 +28,8 @@ class ExtractionService {
    * }>}
    */
   async extract(material, context = {}) {
-    if (!material || !material.filename) {
-      throw new Error("Material or filename not specified for extraction");
+    if (!material || (!material.filename && !material.fileUrl)) {
+      throw new Error("Material or fileUrl not specified for extraction");
     }
 
     const userId = context.userId || material.userId?.toString();
@@ -40,10 +40,25 @@ class ExtractionService {
       throw new Error("Extraction requires userId, projectId, and materialId for isolation");
     }
 
-    const filePath = path.join(uploadDir, material.filename);
+    // Resolve PDF source: fetch buffer in memory from Cloudinary URL, or use local path fallback
+    let pdfSource;
+    if (material.fileUrl && (material.fileUrl.startsWith("http://") || material.fileUrl.startsWith("https://"))) {
+      const response = await fetch(material.fileUrl);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch PDF from cloud storage (${response.status} ${response.statusText}): ${material.fileUrl}`
+        );
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      pdfSource = Buffer.from(arrayBuffer);
+    } else if (material.filename) {
+      pdfSource = path.join(uploadDir, material.filename);
+    } else {
+      throw new Error("No accessible PDF file source found for material");
+    }
 
-    // 1. Parse PDF using PdfService
-    const parsedPdf = await pdfService.parsePdf(filePath);
+    // 1. Parse PDF using PdfService (supports Buffer and file path string)
+    const parsedPdf = await pdfService.parsePdf(pdfSource);
     const { totalPages, pages, tables, images, info } = parsedPdf;
 
     const allSegments = [];

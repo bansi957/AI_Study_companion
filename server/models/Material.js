@@ -33,6 +33,17 @@ const materialSchema = new mongoose.Schema(
       required: true,
     },
 
+    cloudinaryPublicId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    cloudinaryResourceType: {
+      type: String,
+      default: "raw",
+    },
+
     fileType: {
       type: String,
       default: "application/pdf",

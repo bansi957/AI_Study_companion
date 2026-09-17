@@ -4,6 +4,7 @@ const Project = require("../../models/Project");
 const Conversation = require("../../models/Conversation");
 const AIUsage = require("../../models/AIUsage");
 const retrievalService = require("../retrieval/retrieval.service");
+const activityService = require("../analytics/activity.service");
 const llmService = require("./llm.service");
 
 /**
@@ -210,6 +211,17 @@ class TutorService {
       sources: dbSources,
     });
     await conversation.save();
+
+    await activityService.recordActivity({
+      userId,
+      projectId,
+      type: "TUTOR_MESSAGE",
+      metadata: {
+        conversationId: conversation._id,
+        question: cleanMessage.slice(0, 100),
+        supported,
+      },
+    });
 
     return {
       conversationId: conversation._id.toString(),
