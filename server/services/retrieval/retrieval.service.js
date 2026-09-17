@@ -292,6 +292,7 @@ class RetrievalService {
     const embedResult = await embeddingService.embedBatch([query.trim()], {
       userId,
       projectId,
+      inputType: "query",
     });
     const queryEmbedding = embedResult.vectors[0];
 

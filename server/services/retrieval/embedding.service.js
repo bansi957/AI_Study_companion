@@ -32,19 +32,29 @@ class EmbeddingService {
     if (process.env.EMBEDDING_DIMENSION) {
       return parseInt(process.env.EMBEDDING_DIMENSION, 10);
     }
+    const provider = this.getProvider();
     const model = this.getModel();
+    if (provider === "voyage" || model.includes("voyage")) return 1024;
     if (model.includes("004")) return 768;
     if (model.includes("3-large")) return 3072;
     return this.defaultDimension; // default 1536 for text-embedding-3-small
   }
 
   getBaseUrl() {
-    return (process.env.EMBEDDING_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+    if (process.env.EMBEDDING_BASE_URL) {
+      return process.env.EMBEDDING_BASE_URL.replace(/\/+$/, "");
+    }
+    const provider = this.getProvider();
+    if (provider === "voyage") {
+      return "https://api.voyageai.com/v1";
+    }
+    return "https://api.openai.com/v1";
   }
 
   getApiKey() {
     return (
       process.env.EMBEDDING_API_KEY ||
+      process.env.VOYAGE_API_KEY ||
       process.env.OPENAI_API_KEY ||
       process.env.GEMINI_API_KEY ||
       null
@@ -97,7 +107,7 @@ class EmbeddingService {
     const startTime = Date.now();
     const model = options.model || this.getModel();
     const provider = options.provider || this.getProvider();
-    const apiKey = options.apiKey || this.getApiKey();
+    const apiKey = options.apiKey !== undefined ? options.apiKey : this.getApiKey();
     const baseUrl = options.baseUrl || this.getBaseUrl();
 
     // Forced failure simulation for testing error handling in queue
@@ -116,8 +126,45 @@ class EmbeddingService {
       let vectors = [];
       let inputTokens = estimatedTokens;
 
-      // 1. OpenAI or OpenAI-compatible embedding endpoint
-      if (apiKey && provider === "openai" && !options.useLocalOnly) {
+      // 1. Voyage AI embedding endpoint
+      if (provider === "voyage") {
+        if (!apiKey) {
+          throw new Error("Voyage AI API key is missing. Please configure EMBEDDING_API_KEY in .env");
+        }
+        const inputType = options.inputType || (options.isQuery ? "query" : "document");
+        const url = `${baseUrl}/embeddings`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            input: texts,
+            input_type: inputType,
+          }),
+        });
+
+        if (!response.ok) {
+          const errBody = await response.text().catch(() => "");
+          throw new Error(`Voyage AI embedding API returned status ${response.status}: ${errBody}`);
+        }
+
+        const data = await response.json();
+        if (!data.data || !Array.isArray(data.data)) {
+          throw new Error("Voyage AI embedding API returned invalid data format");
+        }
+
+        // Sort by index to ensure original order
+        const sortedData = [...data.data].sort((a, b) => a.index - b.index);
+        vectors = sortedData.map((d) => d.embedding);
+        if (data.usage?.total_tokens) {
+          inputTokens = data.usage.total_tokens;
+        }
+      }
+      // 2. OpenAI or OpenAI-compatible embedding endpoint
+      else if (apiKey && provider === "openai" && !options.useLocalOnly) {
         const url = `${baseUrl}/embeddings`;
         const response = await fetch(url, {
           method: "POST",
@@ -148,7 +195,7 @@ class EmbeddingService {
           inputTokens = data.usage.prompt_tokens;
         }
       }
-      // 2. Google Gemini Embedding API
+      // 3. Google Gemini Embedding API
       else if (apiKey && provider === "gemini" && !options.useLocalOnly) {
         const geminiModel = model.includes("text-embedding") ? model : "text-embedding-004";
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:batchEmbedContents?key=${apiKey}`;
@@ -175,9 +222,12 @@ class EmbeddingService {
         }
         vectors = data.embeddings.map((e) => e.values);
       }
-      // 3. Deterministic Local Vector Engine (fallback)
+      // 4. Deterministic Local Vector Engine (fallback for non-voyage offline/tests)
       else {
-        const targetDim = model.includes("004") ? 768 : this.defaultDimension;
+        if (provider === "voyage") {
+          throw new Error("Voyage AI provider cannot use deterministic fallback");
+        }
+        const targetDim = this.getDimension();
         vectors = texts.map((t) => this.generateDeterministicVector(t, targetDim));
       }
 
@@ -188,7 +238,7 @@ class EmbeddingService {
         model,
         inputTokens,
         latency,
-        dimension: vectors[0]?.length || this.defaultDimension,
+        dimension: vectors[0]?.length || this.getDimension(),
       };
     } catch (error) {
       const latency = Date.now() - startTime;
@@ -238,7 +288,7 @@ class EmbeddingService {
         totalChunks: totalCount,
         embeddedCount: 0,
         alreadyEmbedded: totalCount,
-        dimension: this.defaultDimension,
+        dimension: this.getDimension(),
         batchesCount: 0,
         note: "All chunks already embedded or no chunks exist",
       };
@@ -246,7 +296,7 @@ class EmbeddingService {
 
     const batchSize = options.batchSize || this.getBatchSize();
     let totalEmbedded = 0;
-    let vectorDimension = this.defaultDimension;
+    let vectorDimension = this.getDimension();
     let batchesCount = 0;
 
     // 2. Process chunks in bounded batches
@@ -259,6 +309,7 @@ class EmbeddingService {
       try {
         embedResult = await this.embedBatch(batchTexts, {
           ...options,
+          inputType: "document",
           userId,
           projectId,
         });

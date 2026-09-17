@@ -146,11 +146,12 @@ const uploadMaterial = async (req, res, next) => {
       material: formatMaterialResponse(material),
     });
   } catch (error) {
-    // If an error occurred and a file was written to disk, clean it up
+    return next(error);
+  } finally {
+    // When Cloudinary is active or if an upload error occurs, delete the local temporary staging file
     if (req.file && req.file.path) {
       await fs.promises.unlink(req.file.path).catch(() => {});
     }
-    return next(error);
   }
 };
 
