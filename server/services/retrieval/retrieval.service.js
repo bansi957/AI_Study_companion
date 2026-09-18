@@ -120,9 +120,9 @@ class RetrievalService {
   }
 
   /**
-   * Explicitly drop and recreate or update the Vector Search index for 1536 dimensions
+   * Explicitly drop and recreate or update the Vector Search index for 1024 dimensions
    */
-  async recreateVectorIndex(dimension = 1536) {
+  async recreateVectorIndex(dimension = 1024) {
     const coll = mongoose.connection.collection("chunks");
     const targetDimensions = dimension || embeddingService.getDimension();
     const indexDefinition = {

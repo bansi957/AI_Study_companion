@@ -18,7 +18,7 @@ const sanitizeErrorMessage = (error) => {
 };
 
 /**
- * Extract retry/reset delay from error if provided by Google Gemini API,
+ * Extract retry/reset delay from error if provided by Cohere API,
  * otherwise default to a safe delay such as 10–15 minutes (default: 10 minutes = 600,000ms).
  *
  * @param {Error|Object} error
@@ -136,7 +136,7 @@ const processEmbedding = async (job, token) => {
       retrievalStatus: "READY",
       embeddedChunksCount: embeddingResult.embeddedCount || embeddingResult.alreadyEmbedded || 0,
       embeddingDimension: embeddingResult.dimension,
-      embeddingModel: embeddingResult.model || "gemini-embedding-001",
+      embeddingModel: embeddingResult.model || "embed-v4.0",
       stage: "retrieval_ready",
     };
     await material.save();
@@ -171,17 +171,22 @@ const processEmbedding = async (job, token) => {
       dimension: embeddingResult.dimension,
     };
   } catch (error) {
-    const isQuota = Boolean(error?.isQuotaExceeded === true || error?.code === "QUOTA_EXHAUSTED" || error?.status === 429);
+    const isQuota = Boolean(
+      error?.isQuotaExceeded === true ||
+      error?.code === "QUOTA_EXHAUSTED" ||
+      error?.status === 429 ||
+      error?.statusCode === 429
+    );
     const safeError = sanitizeErrorMessage(error);
 
-    // 1. Handle Gemini HTTP 429 Quota Exceeded with delayed requeue
+    // 1. Handle Cohere HTTP 429 Quota Exceeded with delayed requeue
     // Does NOT consume BullMQ retry attempts (preserves job)
     if (isQuota) {
       const delayMs = extractQuotaRetryDelayMs(error);
       const delayMinutes = Math.round(delayMs / 60000);
 
       console.warn(
-        `[Worker:${EMBEDDING_QUEUE_NAME}] Gemini quota exhausted; delaying job (${delayMinutes}m / ${Math.round(delayMs / 1000)}s)`
+        `[Worker:${EMBEDDING_QUEUE_NAME}] Cohere quota exhausted; delaying job (${delayMinutes}m / ${Math.round(delayMs / 1000)}s)`
       );
 
       // Keep material in PROCESSING status so UI shows it waiting for quota reset
@@ -280,7 +285,7 @@ const startEmbeddingWorker = () => {
       console.warn(`[Worker:${EMBEDDING_QUEUE_NAME}] Worker connection error: ${err.message}`);
     });
 
-    // Check Gemini API embedding configuration
+    // Check Cohere API embedding configuration
     embeddingService.warmup().catch(() => {});
 
     return embeddingWorker;

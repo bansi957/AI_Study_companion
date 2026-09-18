@@ -14,10 +14,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@google/genai": "^2.23.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^6.3.6",
     "cloudinary": "^2.11.0",
+    "cohere-ai": "^8.1.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

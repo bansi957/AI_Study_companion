@@ -1,15 +1,14 @@
-const { GoogleGenAI } = require("@google/genai");
+const { CohereClientV2 } = require("cohere-ai");
 const Chunk = require("../../models/Chunk");
 const Material = require("../../models/Material");
 const AIUsage = require("../../models/AIUsage");
 
 /**
  * Global Embedding Rate Limiter
- * Ensures only one Gemini embedding request is active at a time across the entire process.
- * Enforces a small delay between consecutive requests to prevent RPM spikes.
+ * Ensures embedding requests are serialized with clean spacing between batches.
  */
 class GlobalEmbeddingRateLimiter {
-  constructor(minIntervalMs = 500) {
+  constructor(minIntervalMs = 200) {
     this.active = false;
     this.queue = [];
     this.minIntervalMs = minIntervalMs;
@@ -49,7 +48,7 @@ class GlobalEmbeddingRateLimiter {
 }
 
 /**
- * Detect whether an error corresponds to Gemini quota exhaustion / HTTP 429
+ * Detect whether an error corresponds to Cohere rate limit / quota exhaustion (HTTP 429)
  * vs a brief network glitch or standard transient error.
  */
 function isQuotaExceeded(err) {
@@ -62,24 +61,21 @@ function isQuotaExceeded(err) {
     (err.cause && err.cause.status);
 
   const rawMessage = (err.message || "").toLowerCase();
-  const rawDetails = err.errorDetails || err.statusDetails || "";
-  const detailsStr =
-    typeof rawDetails === "string"
-      ? rawDetails.toLowerCase()
-      : JSON.stringify(rawDetails || "").toLowerCase();
-  const combined = `${rawMessage} ${detailsStr}`;
+  const rawBody = typeof err.body === "string" ? err.body.toLowerCase() : JSON.stringify(err.body || "").toLowerCase();
+  const combined = `${rawMessage} ${rawBody}`;
 
-  if (status === 429 || combined.includes("429") || combined.includes("resource_exhausted")) {
+  if (status === 429 || combined.includes("429") || combined.includes("too many requests")) {
     return true;
   }
 
   if (
     combined.includes("quota") ||
     combined.includes("rate_limit") ||
-    combined.includes("limit per minute") ||
-    combined.includes("requests per minute") ||
-    combined.includes("free_tier") ||
-    combined.includes("exceeded your current quota")
+    combined.includes("rate limit") ||
+    combined.includes("limit exceeded") ||
+    combined.includes("exceeded your current quota") ||
+    combined.includes("trial key") ||
+    combined.includes("plan limit")
   ) {
     return true;
   }
@@ -88,20 +84,24 @@ function isQuotaExceeded(err) {
 }
 
 /**
- * Dedicated Embedding Service using Google Gemini Embedding API
+ * Dedicated Embedding Service using Cohere Embed API
  *
- * Model: gemini-embedding-001
- * Dimension: 1536
- * Provider: gemini (@google/genai SDK)
+ * Provider: Cohere
+ * Model: embed-v4.0
+ * Dimension: 1024
+ * Embedding Type: float
+ * Batch Size: 32
+ * Document chunks: input_type = "search_document"
+ * Tutor/search queries: input_type = "search_query"
  */
 class EmbeddingService {
   constructor() {
-    this.defaultModel = "gemini-embedding-001";
-    this.defaultProvider = "gemini";
-    this.defaultBatchSize = 8;
-    this.defaultDimension = 1536;
+    this.defaultModel = "embed-v4.0";
+    this.defaultProvider = "cohere";
+    this.defaultBatchSize = 32;
+    this.defaultDimension = 1024;
     this.client = null;
-    this.rateLimiter = new GlobalEmbeddingRateLimiter(500);
+    this.rateLimiter = new GlobalEmbeddingRateLimiter(200);
   }
 
   getProvider() {
@@ -124,27 +124,27 @@ class EmbeddingService {
   }
 
   /**
-   * Lazily instantiate and return the GoogleGenAI client singleton.
-   * Ensures GEMINI_API_KEY is loaded and never exposed.
+   * Lazily instantiate and return the CohereClientV2 singleton.
+   * Ensures COHERE_API_KEY is loaded and never exposed.
    *
-   * @returns {GoogleGenAI}
+   * @returns {CohereClientV2}
    */
   getClient() {
     if (this.client) return this.client;
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.COHERE_API_KEY;
     if (!apiKey) {
       throw new Error(
-        "GEMINI_API_KEY is not configured in environment variables. Please set GEMINI_API_KEY to generate embeddings."
+        "COHERE_API_KEY is not configured in environment variables. Please set COHERE_API_KEY to generate embeddings."
       );
     }
 
-    this.client = new GoogleGenAI({ apiKey });
+    this.client = new CohereClientV2({ token: apiKey });
     return this.client;
   }
 
   /**
-   * Sanitize error message to guarantee GEMINI_API_KEY is NEVER logged.
+   * Sanitize error message to guarantee COHERE_API_KEY is NEVER logged.
    *
    * @param {Error|string} err
    * @returns {string}
@@ -153,15 +153,20 @@ class EmbeddingService {
     if (!err) return "Unknown embedding error occurred";
     let message = typeof err === "string" ? err : err.message || JSON.stringify(err);
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      message = message.split(apiKey).join("[REDACTED_GEMINI_KEY]");
+    const cohereKey = process.env.COHERE_API_KEY;
+    if (cohereKey) {
+      message = message.split(cohereKey).join("[REDACTED_COHERE_KEY]");
     }
 
-    // Mask any query param or header containing key=... or AIza...
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (geminiKey) {
+      message = message.split(geminiKey).join("[REDACTED_KEY]");
+    }
+
+    // Mask Bearer tokens, query param or header tokens
     message = message
+      .replace(/bearer\s+[a-zA-Z0-9_\-]+/gi, "Bearer [REDACTED]")
       .replace(/key=[a-zA-Z0-9_\-]+/gi, "key=[REDACTED]")
-      .replace(/AIza[0-9A-Za-z-_]{35}/g, "[REDACTED_API_KEY]")
       .replace(/[A-Za-z]:\\[^:\s\n\r"']+/g, "[file]")
       .replace(/(?:^|[\s"'])\/(?:Users|home|var|tmp|etc|app|node_modules|uploads)[^\s"']*/gi, " [file]")
       .replace(/mongodb(\+srv)?:\/\/[^\s]+/gi, "[db-uri]");
@@ -184,16 +189,18 @@ class EmbeddingService {
       try {
         return await operation();
       } catch (err) {
-        // 1. Quota exceeded (HTTP 429 / RESOURCE_EXHAUSTED):
-        // Do not immediately retry quota-exceeded 3 times!
+        // 1. Quota / Rate limit exceeded (HTTP 429 / TooManyRequests):
+        // Do not rapidly retry 3 times; throw a retryable error so BullMQ can handle it.
         if (isQuotaExceeded(err)) {
-          console.warn("[GeminiEmbedding] quota exhausted - delaying job");
+          console.warn("[CohereEmbedding] quota exhausted - delaying job");
           const safeMsg = this.sanitizeError(err);
-          const quotaErr = new Error(`[GeminiEmbedding] Quota exhausted: ${safeMsg}`);
+          const quotaErr = new Error(`[CohereEmbedding] Quota exhausted: ${safeMsg}`);
           quotaErr.status = 429;
+          quotaErr.statusCode = 429;
           quotaErr.isQuotaExceeded = true;
           quotaErr.code = "QUOTA_EXHAUSTED";
           quotaErr.originalError = safeMsg;
+          quotaErr.headers = err.headers || (err.response && err.response.headers);
           throw quotaErr;
         }
 
@@ -211,13 +218,15 @@ class EmbeddingService {
           status === 504 ||
           err.code === "ECONNRESET" ||
           err.code === "ETIMEDOUT" ||
-          err.name === "FetchError";
+          err.name === "FetchError" ||
+          err.name === "CohereTimeoutError";
 
         if (!isTransient || attempt > maxRetries) {
           const safeMsg = this.sanitizeError(err);
-          console.error(`[GeminiEmbedding] Error: ${safeMsg}`);
-          const safeErr = new Error(`[GeminiEmbedding] ${safeMsg}`);
+          console.error(`[CohereEmbedding] Error: ${safeMsg}`);
+          const safeErr = new Error(`[CohereEmbedding] ${safeMsg}`);
           safeErr.status = status;
+          safeErr.statusCode = status;
           safeErr.originalError = safeMsg;
           throw safeErr;
         }
@@ -225,7 +234,7 @@ class EmbeddingService {
         const jitter = Math.floor(Math.random() * 300);
         const waitTime = delay + jitter;
         console.warn(
-          `[GeminiEmbedding] Temporary transient network error (${status || err.code || "network"}). Retrying attempt ${attempt}/${maxRetries} in ${waitTime}ms...`
+          `[CohereEmbedding] Temporary transient network error (${status || err.code || "network"}). Retrying attempt ${attempt}/${maxRetries} in ${waitTime}ms...`
         );
         await new Promise((resolve) => setTimeout(resolve, waitTime));
         delay *= 2;
@@ -235,27 +244,27 @@ class EmbeddingService {
 
   /**
    * Warmup method (preserved for backwards compatibility).
-   * Verifies Gemini configuration without loading heavy local models into RAM.
+   * Verifies Cohere configuration without loading heavy local models into RAM.
    */
   async warmup() {
-    const hasKey = Boolean(process.env.GEMINI_API_KEY);
+    const hasKey = Boolean(process.env.COHERE_API_KEY);
     if (!hasKey) {
       console.warn(
-        `[GeminiEmbedding] Warning: GEMINI_API_KEY is not yet defined in environment. Embeddings will fail until key is set.`
+        `[CohereEmbedding] Warning: COHERE_API_KEY is not yet defined in environment. Embeddings will fail until key is set.`
       );
     } else {
       console.log(
-        `[GeminiEmbedding] Initialized with Google model "${this.getModel()}" (${this.getDimension()} dimensions)`
+        `[CohereEmbedding] Initialized with Cohere model "${this.getModel()}" (${this.getDimension()} dimensions)`
       );
     }
     return true;
   }
 
   /**
-   * Embed a batch of texts using Google Gemini Embedding API.
+   * Embed a batch of texts using Cohere Embed API.
    *
    * @param {string[]} texts - Array of string chunks or query text
-   * @param {Object} options - { model, taskType, inputType, dimension, userId, projectId, title }
+   * @param {Object} options - { model, inputType, taskType, dimension, userId, projectId }
    * @returns {Promise<Object>} { vectors, model, inputTokens, latency, dimension }
    */
   async embedBatch(texts, options = {}) {
@@ -263,12 +272,13 @@ class EmbeddingService {
     const model = options.model || this.getModel();
     const dimension = options.dimension || this.getDimension();
 
-    // Determine taskType: RETRIEVAL_QUERY for search queries; RETRIEVAL_DOCUMENT for chunks
+    // Map inputType: "search_query" for search queries, "search_document" for document chunks
     const isQuery =
       options.inputType === "query" ||
+      options.inputType === "search_query" ||
       options.taskType === "RETRIEVAL_QUERY" ||
       options.isQuery === true;
-    const taskType = isQuery ? "RETRIEVAL_QUERY" : (options.taskType || "RETRIEVAL_DOCUMENT");
+    const inputType = isQuery ? "search_query" : "search_document";
 
     const textList = Array.isArray(texts) ? texts : [texts];
     if (textList.length === 0) {
@@ -293,50 +303,41 @@ class EmbeddingService {
     );
 
     console.log(
-      `[GeminiEmbedding] batch size: ${sanitizedTexts.length} item(s) (taskType: ${taskType}, outputDimension: ${dimension}, model: ${model})`
+      `[CohereEmbedding] batch size: ${sanitizedTexts.length} item(s) (inputType: ${inputType}, dimension: ${dimension}, model: ${model})`
     );
 
-    const ai = this.getClient();
+    const client = this.getClient();
 
     try {
       const response = await this.rateLimiter.execute(async () => {
         return await this.executeWithRetry(async () => {
-          return await ai.models.embedContent({
+          return await client.embed({
             model,
-            contents: sanitizedTexts,
-            config: {
-              taskType,
-              outputDimensionality: dimension,
-              ...(options.title ? { title: options.title } : {}),
-            },
+            texts: sanitizedTexts,
+            inputType,
+            embeddingTypes: ["float"],
+            outputDimension: dimension,
           });
         });
       });
 
       // Extract vector values from SDK response
       let vectors = [];
-      if (Array.isArray(response?.embeddings) && response.embeddings.length > 0) {
-        vectors = response.embeddings.map((e) => e.values || e);
-      } else if (response?.embedding?.values) {
-        vectors = [response.embedding.values];
-      } else if (Array.isArray(response?.values)) {
-        vectors = [response.values];
-      }
-
-      // Fallback for single text if return format is singular
-      if (sanitizedTexts.length === 1 && vectors.length === 0 && response?.embedding) {
-        vectors = [response.embedding];
+      if (response?.embeddings?.float && Array.isArray(response.embeddings.float)) {
+        vectors = response.embeddings.float;
+      } else if (Array.isArray(response?.embeddings)) {
+        vectors = response.embeddings;
       }
 
       if (!vectors || vectors.length !== sanitizedTexts.length) {
         throw new Error(
-          `[GeminiEmbedding] Vector count mismatch: expected ${sanitizedTexts.length}, received ${vectors?.length || 0}`
+          `[CohereEmbedding] Vector count mismatch: expected ${sanitizedTexts.length}, received ${vectors?.length || 0}`
         );
       }
 
       const latency = Date.now() - startTime;
       console.log(
-        `[GeminiEmbedding] success: ${vectors.length} vector(s) generated in ${latency}ms (dimension: ${vectors[0]?.length || dimension})`
+        `[CohereEmbedding] success: ${vectors.length} vector(s) generated in ${latency}ms (dimension: ${vectors[0]?.length || dimension})`
       );
 
       return {
@@ -357,8 +358,8 @@ class EmbeddingService {
 
   /**
    * Generate and persist embeddings for chunks of a material.
-   * Automatically re-embeds legacy chunks whose dimension does not match 1536 or whose model differs.
-   * Persists each batch immediately upon success.
+   * Automatically re-embeds legacy chunks whose dimension does not match 1024 or whose model differs.
+   * Persists each batch of 32 chunks immediately upon success.
    *
    * @param {string|ObjectId} materialId
    * @param {Object} context - { userId, projectId, materialId }
@@ -398,7 +399,8 @@ class EmbeddingService {
     // 2. Filter chunks that need embedding:
     // If forceRegenerate is set, re-embed everything.
     // Otherwise, embed chunks that are missing embeddings, have an empty array,
-    // or have an incompatible vector dimension (e.g. legacy 384-dim ONNX vectors or 1024-dim vectors).
+    // or have an incompatible vector dimension (e.g. legacy 1536-dim Gemini or 384-dim ONNX vectors),
+    // or whose model !== embed-v4.0.
     const chunksToEmbed = options.forceRegenerate
       ? allChunks
       : allChunks.filter((c) => {
@@ -415,7 +417,7 @@ class EmbeddingService {
         alreadyEmbedded: allChunks.length,
         dimension: targetDim,
         batchesCount: 0,
-        note: `All chunks are already embedded with Gemini ${targetDim}-dimensional model`,
+        note: `All chunks are already embedded with Cohere ${targetDim}-dimensional model`,
       };
     }
 
@@ -423,14 +425,14 @@ class EmbeddingService {
     let totalEmbedded = 0;
     let batchesCount = 0;
 
-    // 3. Process chunks in bounded batches (default 8 chunks per batch)
+    // 3. Process chunks in bounded batches (default 32 chunks per batch)
     for (let i = 0; i < chunksToEmbed.length; i += batchSize) {
       batchesCount++;
       const chunkBatch = chunksToEmbed.slice(i, i + batchSize);
       const batchTexts = chunkBatch.map((c) => c.text);
 
       console.log(
-        `[GeminiEmbedding] batch size: ${batchTexts.length} chunks (${i + 1}-${Math.min(i + batchSize, chunksToEmbed.length)} of ${chunksToEmbed.length})`
+        `[CohereEmbedding] batch size: ${batchTexts.length} chunks (${i + 1}-${Math.min(i + batchSize, chunksToEmbed.length)} of ${chunksToEmbed.length})`
       );
 
       let embedResult;
@@ -439,7 +441,7 @@ class EmbeddingService {
           ...options,
           userId,
           projectId,
-          taskType: "RETRIEVAL_DOCUMENT",
+          inputType: "search_document",
           dimension: targetDim,
           model: targetModel,
         });
@@ -460,15 +462,15 @@ class EmbeddingService {
         throw err;
       }
 
-      // 4. Persist 1536-dimensional embeddings back to MongoDB Chunk documents IMMEDIATELY
+      // 4. Persist 1024-dimensional embeddings back to MongoDB Chunk documents IMMEDIATELY
       const bulkOps = chunkBatch.map((chunk, idx) => ({
         updateOne: {
           filter: { _id: chunk._id },
           update: {
             $set: {
               embedding: embedResult.vectors[idx],
-              "metadata.embeddingModel": embedResult.model,
-              "metadata.embeddingDimension": embedResult.dimension,
+              "metadata.embeddingModel": targetModel,
+              "metadata.embeddingDimension": targetDim,
               "metadata.embeddedAt": new Date(),
             },
           },
@@ -479,7 +481,7 @@ class EmbeddingService {
       totalEmbedded += chunkBatch.length;
 
       console.log(
-        `[GeminiEmbedding] success: batch of ${chunkBatch.length} chunks persisted to database (${totalEmbedded}/${chunksToEmbed.length} total embedded)`
+        `[CohereEmbedding] success: batch of ${chunkBatch.length} chunks persisted to database (${totalEmbedded}/${chunksToEmbed.length} total embedded)`
       );
 
       // Record successful AIUsage
@@ -507,7 +509,7 @@ class EmbeddingService {
   }
 
   /**
-   * Re-embed all chunks of a specific material with the Gemini 1536-dimensional model.
+   * Re-embed all chunks of a specific material with the Cohere 1024-dimensional model.
    *
    * @param {string|ObjectId} materialId
    * @param {Object} context - { userId, projectId }
@@ -518,7 +520,7 @@ class EmbeddingService {
   }
 
   /**
-   * Re-embed all materials in a project with the Gemini 1536-dimensional model.
+   * Re-embed all materials in a project with the Cohere 1024-dimensional model.
    *
    * @param {string|ObjectId} projectId
    * @param {Object} context - { userId }
@@ -559,7 +561,7 @@ class EmbeddingService {
         errorMessage: errorMessage ? this.sanitizeError(errorMessage) : null,
       });
     } catch (err) {
-      console.warn(`[GeminiEmbedding] Failed to record AIUsage: ${this.sanitizeError(err.message)}`);
+      console.warn(`[CohereEmbedding] Failed to record AIUsage: ${this.sanitizeError(err.message)}`);
     }
   }
 }
