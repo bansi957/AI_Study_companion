@@ -14,7 +14,9 @@ import {
   Clock,
   Target,
   Upload,
+  Lock,
 } from "lucide-react";
+import toast from "react-hot-toast";
 import { useGetProjectByIdQuery } from "../../features/projects/projectsApi";
 import { useGetSpaceByIdQuery } from "../../features/spaces/spacesApi";
 import { useGetMaterialsByProjectIdQuery } from "../../features/materials/materialsApi";
@@ -58,7 +60,16 @@ export const ProjectWorkspacePage = () => {
   const currentTab = searchParams.get("tab") || "overview";
   const activeTab = VALID_TABS.some((t) => t.id === currentTab) ? currentTab : "overview";
 
+  // Assessment tab locking state to prevent progress loss
+  const [isAssessmentActive, setIsAssessmentActive] = React.useState(false);
+
   const handleTabChange = (tabId) => {
+    if (isAssessmentActive && tabId !== "quiz") {
+      toast.error("Assessment in progress! Please complete or submit your quiz before switching tabs to avoid losing progress.", {
+        id: "tab-locked-warning",
+      });
+      return;
+    }
     setSearchParams({ tab: tabId });
     if (tabId === "growth") refetchGrowth?.();
     if (tabId === "analytics") refetchAnalytics?.();
@@ -67,6 +78,18 @@ export const ProjectWorkspacePage = () => {
       refetchGrowth?.();
     }
   };
+
+  // Prevent accidental page reload or back navigation when assessment is running
+  React.useEffect(() => {
+    if (!isAssessmentActive) return;
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "You have an active assessment in progress. Leaving will cause your quiz answers to be lost.";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isAssessmentActive]);
 
   // Queries
   const {
@@ -265,27 +288,57 @@ export const ProjectWorkspacePage = () => {
 
       {/* 2. TABBED NAVIGATION STRIP */}
       <div className="border-b border-slate-800/80 sticky top-0 z-20 bg-slate-950/80 backdrop-blur-md -mx-4 px-4 sm:mx-0 sm:px-0">
+        {/* Active Assessment Warning Banner */}
+        {isAssessmentActive && (
+          <div className="bg-amber-950/60 border-b border-amber-800/50 px-4 py-2 flex items-center justify-between text-xs text-amber-200 animate-fade-in">
+            <div className="flex items-center gap-2">
+              <Lock className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
+              <span>
+                <strong>Adaptive Assessment in progress:</strong> Other workspace tabs are locked so you don't lose your quiz progress.
+              </span>
+            </div>
+            <span className="text-[11px] text-amber-400/80 font-medium hidden sm:inline-block">Complete quiz to unlock tabs</span>
+          </div>
+        )}
+
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-2">
           {VALID_TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
+            const isTabDisabled = isAssessmentActive && tab.id !== "quiz";
 
             return (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => handleTabChange(tab.id)}
+                disabled={isTabDisabled}
+                title={
+                  isTabDisabled
+                    ? "Assessment in progress — complete your quiz before switching tabs"
+                    : undefined
+                }
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                  isActive
+                  isTabDisabled
+                    ? "opacity-35 cursor-not-allowed text-slate-500 bg-slate-900/40 select-none"
+                    : isActive
                     ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/25"
                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? "text-white" : "text-slate-400"}`} />
+                <Icon className={`w-4 h-4 ${isActive ? "text-white" : isTabDisabled ? "text-slate-600" : "text-slate-400"}`} />
                 <span>{tab.label}</span>
 
+                {/* Lock indicator on quiz tab if active */}
+                {tab.id === "quiz" && isAssessmentActive && (
+                  <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40 flex items-center gap-1 animate-pulse">
+                    <Lock className="w-2.5 h-2.5" />
+                    In Progress
+                  </span>
+                )}
+
                 {/* Badges for tabs */}
-                {tab.id === "materials" && readyMaterials.length > 0 && (
+                {tab.id === "materials" && readyMaterials.length > 0 && !isAssessmentActive && (
                   <span
                     className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
                       isActive
@@ -297,7 +350,7 @@ export const ProjectWorkspacePage = () => {
                   </span>
                 )}
 
-                {tab.id === "growth" && averageMastery > 0 && (
+                {tab.id === "growth" && averageMastery > 0 && !isAssessmentActive && (
                   <span
                     className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
                       isActive
@@ -359,7 +412,9 @@ export const ProjectWorkspacePage = () => {
             materials={materials}
             growth={growth}
             onSwitchTab={handleTabChange}
+            onAssessmentStatusChange={setIsAssessmentActive}
             onQuizCompleted={() => {
+              setIsAssessmentActive(false);
               refetchAnalytics?.();
               refetchGrowth?.();
             }}

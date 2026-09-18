@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   BrainCircuit,
   Sparkles,
@@ -44,6 +44,7 @@ export const QuizTab = ({
   growth,
   onSwitchTab,
   onQuizCompleted,
+  onAssessmentStatusChange,
 }) => {
   const readyMaterials = materials.filter((m) => m.status === "READY");
 
@@ -75,6 +76,29 @@ export const QuizTab = ({
 
   // Final Results & Mastery State
   const [quizResults, setQuizResults] = useState(null);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  // Sync assessment active status to parent to lock workspace tabs and prevent data loss
+  useEffect(() => {
+    const isBusy = phase === "ACTIVE" || isGenerating || isStarting;
+    onAssessmentStatusChange?.(isBusy);
+    return () => {
+      onAssessmentStatusChange?.(false);
+    };
+  }, [phase, isGenerating, isStarting, onAssessmentStatusChange]);
+
+  const handleAbandonQuiz = () => {
+    setPhase("SETUP");
+    setActiveQuiz(null);
+    setActiveAttempt(null);
+    setSelectedOption(null);
+    setOpenEndedAnswer("");
+    setQuestionFeedback(null);
+    setUserAnswers({});
+    setShowExitConfirm(false);
+    onAssessmentStatusChange?.(false);
+    toast("Assessment exited. Tabs unlocked.", { icon: "ℹ️" });
+  };
 
   // Extract all available concepts from growth data
   const allConcepts = useMemo(() => {
@@ -700,8 +724,19 @@ export const QuizTab = ({
                 </Badge>
               </div>
 
-              <div className="text-xs text-slate-400 font-medium">
-                {Math.round(((currentQuestionIndex + 1) / activeQuiz.questions.length) * 100)}% Complete
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 font-medium hidden sm:inline">
+                  {Math.round(((currentQuestionIndex + 1) / activeQuiz.questions.length) * 100)}% Complete
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowExitConfirm(true)}
+                  className="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-950/50 rounded-lg border border-rose-800/40 transition-colors flex items-center gap-1 cursor-pointer font-medium"
+                  title="Abandon assessment and unlock navigation"
+                >
+                  <XIcon className="w-3.5 h-3.5" />
+                  <span>Exit Quiz</span>
+                </button>
               </div>
             </div>
 
@@ -1010,6 +1045,29 @@ export const QuizTab = ({
               </div>
             );
           })()}
+
+          {/* Exit Quiz Confirmation Modal */}
+          {showExitConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+              <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center gap-3 text-rose-400">
+                  <AlertTriangle className="w-6 h-6 shrink-0" />
+                  <h4 className="text-base font-bold text-white">Exit Active Assessment?</h4>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Are you sure you want to exit? Your answers and progress in this assessment will be discarded. Navigation tabs will be unlocked once you exit.
+                </p>
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <Button variant="secondary" size="sm" onClick={() => setShowExitConfirm(false)}>
+                    Resume Quiz
+                  </Button>
+                  <Button variant="danger" size="sm" onClick={handleAbandonQuiz}>
+                    Exit & Discard
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

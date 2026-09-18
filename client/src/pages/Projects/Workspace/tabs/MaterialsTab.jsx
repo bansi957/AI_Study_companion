@@ -247,6 +247,24 @@ export const MaterialsTab = ({
             <span>•</span>
             <span>Auto-indexed</span>
           </div>
+
+          <div className="pt-3 border-t border-slate-800/80">
+            <p className="text-xs text-amber-300/90 font-medium flex items-center justify-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>Note: For more pages, processing and embedding takes several minutes.</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Processing Notice Banner */}
+      <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-950/20 border border-amber-800/40 text-amber-200/90 text-xs">
+        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <div className="space-y-0.5">
+          <p className="font-semibold text-amber-300">Processing & Embedding Notice</p>
+          <p className="text-amber-200/80 leading-relaxed">
+            Note: For documents with more pages, PDF text extraction, concept discovery, and vector embedding takes several minutes. The background pipeline will automatically update the status from <em>Queued</em> to <em>Ready</em> once finished.
+          </p>
         </div>
       </div>
 
