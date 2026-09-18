@@ -395,7 +395,7 @@ export const AdminDashboardPage = () => {
     { skip: activeTab !== "users" && activeTab !== "overview" }
   );
   const { data: activitiesData, isLoading: isActivitiesLoading, refetch: refetchActivities } = useGetAdminActivitiesQuery(
-    { limit: 25, type: activityFilter !== "all" ? activityFilter : undefined },
+    { limit: 50, type: activityFilter !== "all" ? activityFilter : undefined },
     { skip: activeTab !== "activity" && activeTab !== "overview" }
   );
   const { data: aiUsageData, isLoading: isAiUsageLoading, refetch: refetchAiUsage } = useGetAdminAIUsageQuery(
@@ -432,7 +432,14 @@ export const AdminDashboardPage = () => {
     let details = a.metadata?.notes || a.description || "Activity logged";
     if (a.type === "QUIZ_COMPLETED") { actionText = "completed quiz"; details = a.metadata?.score !== undefined ? `Score: ${a.metadata.score}/${a.metadata.totalQuestions || 5}` : details; }
     else if (a.type === "MATERIAL_UPLOADED") { actionText = "uploaded material"; details = a.metadata?.filename || "Study Material.pdf"; }
-    else if (a.type === "TUTOR_SESSION" || a.type === "TUTOR_MESSAGE") { actionText = "tutor session"; details = a.metadata?.messageCount ? `${a.metadata.messageCount} messages` : "AI Tutor interaction"; }
+    else if (a.type === "TUTOR_SESSION" || a.type === "TUTOR_MESSAGE") {
+      actionText = "tutor session";
+      details = a.metadata?.question
+        ? `"${a.metadata.question.length > 55 ? a.metadata.question.slice(0, 55) + "…" : a.metadata.question}"`
+        : a.metadata?.messageCount
+          ? `${a.metadata.messageCount} messages`
+          : "AI Tutor interaction";
+    }
     else if (a.type === "MASTERY_UPDATED") { actionText = "mastery updated"; details = a.metadata?.conceptName ? `${a.metadata.conceptName}: Lv ${a.metadata.level || 3}` : "Mastery progress"; }
     return { id: a._id, userName: uName, initials, actionText, projectName: pName, details, timeAgo: formatTimeAgo(a.createdAt), type: a.type };
   });
@@ -440,15 +447,27 @@ export const AdminDashboardPage = () => {
   // Activity type distribution for pie chart
   const activityTypeCounts = useMemo(() => {
     const map = {};
-    rawActivities.forEach((a) => { map[a.type] = (map[a.type] || 0) + 1; });
+    rawActivities.forEach((a) => {
+      const typeKey = (a.type === "TUTOR_MESSAGE" || a.type === "TUTOR_SESSION") ? "TUTOR_SESSION" : a.type;
+      map[typeKey] = (map[typeKey] || 0) + 1;
+    });
     return map;
   }, [rawActivities]);
 
-  const activityPieColors = { QUIZ_COMPLETED: "#10b981", MATERIAL_UPLOADED: "#6366f1", TUTOR_SESSION: "#a855f7", TUTOR_MESSAGE: "#a855f7", MASTERY_UPDATED: "#f59e0b" };
+  const activityPieColors = {
+    QUIZ_COMPLETED: "#10b981",
+    MATERIAL_UPLOADED: "#6366f1",
+    TUTOR_SESSION: "#a855f7",
+    TUTOR_MESSAGE: "#a855f7",
+    MASTERY_UPDATED: "#f59e0b",
+    SPACE_CREATED: "#06b6d4",
+    PROJECT_CREATED: "#3b82f6",
+    QUESTION_ANSWERED: "#8b5cf6",
+  };
   const activityPieSegments = useMemo(() => {
     const colorFallback = ["#6366f1", "#10b981", "#f59e0b", "#a855f7", "#3b82f6"];
     return Object.entries(activityTypeCounts).map(([type, count], i) => ({
-      name: type.replace(/_/g, " "),
+      name: type === "TUTOR_SESSION" ? "Tutor Sessions" : type.replace(/_/g, " "),
       value: count,
       color: activityPieColors[type] || colorFallback[i % colorFallback.length],
     }));
@@ -866,7 +885,7 @@ export const AdminDashboardPage = () => {
                     : "bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800"
                 }`}
               >
-                {type === "all" ? "All Activity" : type.replace(/_/g, " ")}
+                {type === "all" ? "All Activity" : type === "TUTOR_SESSION" ? "Tutor Sessions" : type.replace(/_/g, " ")}
               </button>
             ))}
           </div>

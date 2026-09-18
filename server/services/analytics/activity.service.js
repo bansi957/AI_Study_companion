@@ -16,6 +16,7 @@ class ActivityService {
       "MATERIAL_UPLOADED",
       "MATERIAL_PROCESSED",
       "TUTOR_MESSAGE",
+      "TUTOR_SESSION",
       "QUIZ_STARTED",
       "QUESTION_ANSWERED",
       "QUIZ_COMPLETED",

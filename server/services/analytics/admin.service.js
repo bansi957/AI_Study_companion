@@ -255,7 +255,11 @@ const getActivities = async ({ page = 1, limit = 20, userId, projectId, type } =
     query.projectId = projectId;
   }
   if (type) {
-    query.type = type;
+    if (type === "TUTOR_SESSION" || type === "TUTOR_MESSAGE") {
+      query.type = { $in: ["TUTOR_SESSION", "TUTOR_MESSAGE"] };
+    } else {
+      query.type = type;
+    }
   }
 
   const [total, activities] = await Promise.all([
