@@ -43,7 +43,7 @@ app.use(express.json());
 
 app.use(
   cors({
-    origin:"https://ai-study-companion-2uzu.onrender.com"
+    origin:"https://ai-study-companion-2uzu.onrender.com",
     credentials: true,
   })
 );
