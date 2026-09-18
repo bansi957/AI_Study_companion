@@ -12,6 +12,7 @@ const env = loadEnv();
 const connectDB = require("./config/db");
 const { initSocket } = require("./config/socket");
 const errorMiddleware = require("./middleware/error.middleware");
+const { startDocumentWorker, closeDocumentWorker } = require("./workers/document.worker");
 
 const authRoutes = require("./routes/auth.routes");
 const spaceRoutes = require("./routes/space.routes");
@@ -81,15 +82,26 @@ const startServer = () => {
     console.log(`Server running on port ${env.port} with Socket.io active`);
   });
 
+  // Start background document processing worker unless RUN_WORKER=false (decoupled worker deployment)
+  if (process.env.RUN_WORKER !== "false") {
+    startDocumentWorker();
+  }
+
   return server;
 };
 
 // Graceful shutdown
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
+  if (process.env.RUN_WORKER !== "false") {
+    await closeDocumentWorker().catch(() => {});
+  }
   process.exit(0);
 });
 
-process.on("SIGTERM", () => {
+process.on("SIGTERM", async () => {
+  if (process.env.RUN_WORKER !== "false") {
+    await closeDocumentWorker().catch(() => {});
+  }
   process.exit(0);
 });
 

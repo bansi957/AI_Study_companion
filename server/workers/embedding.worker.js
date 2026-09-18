@@ -82,7 +82,7 @@ const processEmbedding = async (job) => {
       retrievalStatus: "READY",
       embeddedChunksCount: embeddingResult.embeddedCount || embeddingResult.alreadyEmbedded || 0,
       embeddingDimension: embeddingResult.dimension,
-      embeddingModel: embeddingResult.model || "onnx-community/all-MiniLM-L6-v2-ONNX",
+      embeddingModel: embeddingResult.model || "gemini-embedding-001",
       stage: "retrieval_ready",
     };
     await material.save();
@@ -155,6 +155,9 @@ const startEmbeddingWorker = () => {
 
     embeddingWorker.on("completed", (job) => {
       console.log(`[Worker:${EMBEDDING_QUEUE_NAME}] Job ${job.id} completed successfully`);
+      if (global.gc) {
+        try { global.gc(); } catch (e) {}
+      }
     });
 
     embeddingWorker.on("failed", (job, err) => {
@@ -167,10 +170,8 @@ const startEmbeddingWorker = () => {
       console.warn(`[Worker:${EMBEDDING_QUEUE_NAME}] Worker connection error: ${err.message}`);
     });
 
-    // Warm up local Hugging Face Transformers.js model in background
-    embeddingService.warmup().catch((err) => {
-      console.warn(`[Worker:${EMBEDDING_QUEUE_NAME}] Local embedding warmup warning: ${err.message}`);
-    });
+    // Check Gemini API embedding configuration
+    embeddingService.warmup().catch(() => {});
 
     return embeddingWorker;
   } catch (err) {

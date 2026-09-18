@@ -69,7 +69,7 @@ const chunkSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Embedding vector: 384-dimensional unit-normalized vector (onnx-community/all-MiniLM-L6-v2-ONNX)
+    // Embedding vector: 1536-dimensional unit-normalized vector (gemini-embedding-001)
     embedding: {
       type: [Number],
       required: false,

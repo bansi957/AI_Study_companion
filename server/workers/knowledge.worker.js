@@ -124,6 +124,9 @@ const startKnowledgeWorker = () => {
 
     knowledgeWorker.on("completed", (job) => {
       console.log(`[Worker:${KNOWLEDGE_QUEUE_NAME}] Job ${job.id} completed successfully`);
+      if (global.gc) {
+        try { global.gc(); } catch (e) {}
+      }
     });
 
     knowledgeWorker.on("failed", (job, err) => {

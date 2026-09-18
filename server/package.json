@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "start": "node server.js",
-    "worker": "node worker.js",
+    "start": "node --expose-gc --max-old-space-size=384 server.js",
+    "worker": "node --expose-gc --max-old-space-size=384 workers/runWorkers.js",
     "dev": "nodemon server.js"
   },
   "keywords": [],
@@ -14,7 +14,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@huggingface/transformers": "^4.3.0",
+    "@google/genai": "^2.23.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^6.3.6",
     "cloudinary": "^2.11.0",

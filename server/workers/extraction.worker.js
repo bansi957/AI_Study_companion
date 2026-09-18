@@ -177,6 +177,9 @@ const startExtractionWorker = () => {
 
     extractionWorker.on("completed", (job) => {
       console.log(`[Worker:${EXTRACTION_QUEUE_NAME}] Job ${job.id} completed successfully`);
+      if (global.gc) {
+        try { global.gc(); } catch (e) {}
+      }
     });
 
     extractionWorker.on("failed", (job, err) => {

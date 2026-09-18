@@ -1,21 +1,25 @@
+const { GoogleGenAI } = require("@google/genai");
 const Chunk = require("../../models/Chunk");
 const Material = require("../../models/Material");
 const AIUsage = require("../../models/AIUsage");
-const localEmbedding = require("./localEmbedding");
 
 /**
- * Dedicated Embedding Service
+ * Dedicated Embedding Service using Google Gemini Embedding API
  *
- * Generates vector representations for document chunks and queries using a local
- * Hugging Face Transformers.js ONNX pipeline (all-MiniLM-L6-v2-ONNX, 384 dimensions).
- * Runs completely locally inside Node.js with zero external API dependencies.
+ * Model: gemini-embedding-001
+ * Dimension: 1536
+ * Provider: gemini (@google/genai SDK)
+ *
+ * Fully replaces local ONNX Transformers.js model to ensure low memory
+ * consumption on cloud hosting environments such as Render.
  */
 class EmbeddingService {
   constructor() {
-    this.defaultModel = "onnx-community/all-MiniLM-L6-v2-ONNX";
-    this.defaultProvider = "local";
+    this.defaultModel = "gemini-embedding-001";
+    this.defaultProvider = "gemini";
     this.defaultBatchSize = 32;
-    this.defaultDimension = 384;
+    this.defaultDimension = 1536;
+    this.client = null;
   }
 
   getProvider() {
@@ -38,56 +42,216 @@ class EmbeddingService {
   }
 
   /**
-   * Warm up local embedding model asynchronously (non-blocking for startup).
+   * Lazily instantiate and return the GoogleGenAI client singleton.
+   * Ensures GEMINI_API_KEY is loaded and never exposed.
+   *
+   * @returns {GoogleGenAI}
    */
-  async warmup() {
-    return localEmbedding.warmup();
+  getClient() {
+    if (this.client) return this.client;
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "GEMINI_API_KEY is not configured in environment variables. Please set GEMINI_API_KEY to generate embeddings."
+      );
+    }
+
+    this.client = new GoogleGenAI({ apiKey });
+    return this.client;
   }
 
   /**
-   * Embed a batch of texts using the local Hugging Face model.
+   * Sanitize error message to guarantee GEMINI_API_KEY is NEVER logged.
+   *
+   * @param {Error|string} err
+   * @returns {string}
+   */
+  sanitizeError(err) {
+    if (!err) return "Unknown embedding error occurred";
+    let message = typeof err === "string" ? err : err.message || JSON.stringify(err);
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      message = message.split(apiKey).join("[REDACTED_GEMINI_KEY]");
+    }
+
+    // Mask any query param or header containing key=... or AIza...
+    message = message
+      .replace(/key=[a-zA-Z0-9_\-]+/gi, "key=[REDACTED]")
+      .replace(/AIza[0-9A-Za-z-_]{35}/g, "[REDACTED_API_KEY]")
+      .replace(/[A-Za-z]:\\[^:\s\n\r"']+/g, "[file]")
+      .replace(/(?:^|[\s"'])\/(?:Users|home|var|tmp|etc|app|node_modules|uploads)[^\s"']*/gi, " [file]")
+      .replace(/mongodb(\+srv)?:\/\/[^\s]+/gi, "[db-uri]");
+
+    return message.length > 300 ? `${message.slice(0, 297)}...` : message;
+  }
+
+  /**
+   * Execute API call with exponential backoff retry for transient and 429 errors.
+   *
+   * @param {Function} operation
+   * @returns {Promise<any>}
+   */
+  async executeWithRetry(operation) {
+    const maxRetries = 3;
+    let delay = 1000;
+
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      try {
+        return await operation();
+      } catch (err) {
+        const status =
+          err.status ||
+          err.statusCode ||
+          (err.response && err.response.status) ||
+          (err.cause && err.cause.status);
+
+        const isRateLimit =
+          status === 429 ||
+          (err.message && (err.message.includes("429") || err.message.includes("RESOURCE_EXHAUSTED")));
+
+        const isTransient =
+          isRateLimit ||
+          status === 500 ||
+          status === 502 ||
+          status === 503 ||
+          status === 504 ||
+          err.code === "ECONNRESET" ||
+          err.code === "ETIMEDOUT" ||
+          err.name === "FetchError";
+
+        // Do not retry permanently failing client errors (400, 401, 403, 404) or beyond maxRetries
+        if (!isTransient || attempt > maxRetries) {
+          const safeMsg = this.sanitizeError(err);
+          console.error(`[GeminiEmbedding] Error: ${safeMsg}`);
+          const safeErr = new Error(`[GeminiEmbedding] ${safeMsg}`);
+          safeErr.status = status;
+          safeErr.originalError = safeMsg;
+          throw safeErr;
+        }
+
+        const jitter = Math.floor(Math.random() * 300);
+        const waitTime = delay + jitter;
+        console.warn(
+          `[GeminiEmbedding] Rate limit / transient error (${status || err.code || "network"}). Retrying attempt ${attempt}/${maxRetries} in ${waitTime}ms...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+        delay *= 2;
+      }
+    }
+  }
+
+  /**
+   * Warmup method (preserved for backwards compatibility).
+   * Verifies Gemini configuration without loading heavy local models into RAM.
+   */
+  async warmup() {
+    const hasKey = Boolean(process.env.GEMINI_API_KEY);
+    if (!hasKey) {
+      console.warn(
+        `[GeminiEmbedding] Warning: GEMINI_API_KEY is not yet defined in environment. Embeddings will fail until key is set.`
+      );
+    } else {
+      console.log(
+        `[GeminiEmbedding] Initialized with Google model "${this.getModel()}" (${this.getDimension()} dimensions)`
+      );
+    }
+    return true;
+  }
+
+  /**
+   * Embed a batch of texts using Google Gemini Embedding API.
    *
    * @param {string[]} texts - Array of string chunks or query text
-   * @param {Object} options - { model, provider, forceFailure, userId, projectId }
+   * @param {Object} options - { model, taskType, inputType, dimension, userId, projectId, title }
    * @returns {Promise<Object>} { vectors, model, inputTokens, latency, dimension }
    */
   async embedBatch(texts, options = {}) {
     const startTime = Date.now();
     const model = options.model || this.getModel();
-    const provider = options.provider || this.getProvider();
+    const dimension = options.dimension || this.getDimension();
 
-    if (options.forceFailure) {
-      throw new Error("Simulated embedding provider failure");
-    }
+    // Determine taskType: RETRIEVAL_QUERY for search queries; RETRIEVAL_DOCUMENT for chunks
+    const isQuery =
+      options.inputType === "query" ||
+      options.taskType === "RETRIEVAL_QUERY" ||
+      options.isQuery === true;
+    const taskType = isQuery ? "RETRIEVAL_QUERY" : (options.taskType || "RETRIEVAL_DOCUMENT");
 
     const textList = Array.isArray(texts) ? texts : [texts];
+    if (textList.length === 0) {
+      return {
+        vectors: [],
+        model,
+        inputTokens: 0,
+        latency: 0,
+        dimension,
+      };
+    }
+
+    // Clean inputs and enforce safe character bounds per item
+    const sanitizedTexts = textList.map((t) =>
+      t && typeof t === "string" ? t.trim().slice(0, 10000) : " "
+    );
 
     // Token estimation: ~4 characters per token + 5 overhead
-    const estimatedTokens = textList.reduce(
-      (sum, t) => sum + Math.max(Math.ceil((t || "").length / 4), 1) + 5,
+    const estimatedTokens = sanitizedTexts.reduce(
+      (sum, t) => sum + Math.max(Math.ceil(t.length / 4), 1) + 5,
       0
     );
 
-    try {
-      let vectors = [];
+    console.log(
+      `[GeminiEmbedding] Request started: ${sanitizedTexts.length} item(s) (taskType: ${taskType}, outputDimension: ${dimension}, model: ${model})`
+    );
 
-      // Local Hugging Face Transformers.js embedding (default)
-      if (provider === "local" || !options.useExternalOnly) {
-        vectors = await localEmbedding.embed(textList);
-      } else {
-        // Fallback for custom external providers if explicitly requested
-        vectors = await localEmbedding.embed(textList);
+    const ai = this.getClient();
+
+    try {
+      const response = await this.executeWithRetry(async () => {
+        return await ai.models.embedContent({
+          model,
+          contents: sanitizedTexts,
+          config: {
+            taskType,
+            outputDimensionality: dimension,
+            ...(options.title ? { title: options.title } : {}),
+          },
+        });
+      });
+
+      // Extract vector values from SDK response
+      let vectors = [];
+      if (Array.isArray(response?.embeddings) && response.embeddings.length > 0) {
+        vectors = response.embeddings.map((e) => e.values || e);
+      } else if (response?.embedding?.values) {
+        vectors = [response.embedding.values];
+      } else if (Array.isArray(response?.values)) {
+        vectors = [response.values];
+      }
+
+      // Fallback for single text if return format is singular
+      if (sanitizedTexts.length === 1 && vectors.length === 0 && response?.embedding) {
+        vectors = [response.embedding];
+      }
+
+      if (!vectors || vectors.length !== sanitizedTexts.length) {
+        throw new Error(
+          `[GeminiEmbedding] Vector count mismatch: expected ${sanitizedTexts.length}, received ${vectors?.length || 0}`
+        );
       }
 
       const latency = Date.now() - startTime;
-      const dimension = vectors[0]?.length || this.getDimension();
+      console.log(
+        `[GeminiEmbedding] Batch completed: ${vectors.length} vector(s) generated in ${latency}ms (dimension: ${vectors[0]?.length || dimension})`
+      );
 
       return {
         vectors,
         model,
         inputTokens: estimatedTokens,
         latency,
-        dimension,
+        dimension: vectors[0]?.length || dimension,
       };
     } catch (error) {
       const latency = Date.now() - startTime;
@@ -100,7 +264,7 @@ class EmbeddingService {
 
   /**
    * Generate and persist embeddings for chunks of a material.
-   * Automatically re-embeds legacy chunks whose dimension does not match 384 or whose model differs.
+   * Automatically re-embeds legacy chunks whose dimension does not match 1536 or whose model differs.
    *
    * @param {string|ObjectId} materialId
    * @param {Object} context - { userId, projectId, materialId }
@@ -140,7 +304,7 @@ class EmbeddingService {
     // 2. Filter chunks that need embedding:
     // If forceRegenerate is set, re-embed everything.
     // Otherwise, embed chunks that are missing embeddings, have an empty array,
-    // or have an incompatible vector dimension (e.g. legacy Voyage 1024-dim vectors).
+    // or have an incompatible vector dimension (e.g. legacy 384-dim ONNX vectors or 1024-dim vectors).
     const chunksToEmbed = options.forceRegenerate
       ? allChunks
       : allChunks.filter((c) => {
@@ -157,7 +321,7 @@ class EmbeddingService {
         alreadyEmbedded: allChunks.length,
         dimension: targetDim,
         batchesCount: 0,
-        note: "All chunks are already embedded with the 384-dimensional local model",
+        note: `All chunks are already embedded with Gemini ${targetDim}-dimensional model`,
       };
     }
 
@@ -177,6 +341,9 @@ class EmbeddingService {
           ...options,
           userId,
           projectId,
+          taskType: "RETRIEVAL_DOCUMENT",
+          dimension: targetDim,
+          model: targetModel,
         });
       } catch (err) {
         if (userId && projectId) {
@@ -206,7 +373,7 @@ class EmbeddingService {
         });
       }
 
-      // 4. Persist 384-dimensional embeddings back to MongoDB Chunk documents
+      // 4. Persist 1536-dimensional embeddings back to MongoDB Chunk documents
       const bulkOps = chunkBatch.map((chunk, idx) => ({
         updateOne: {
           filter: { _id: chunk._id },
@@ -236,7 +403,7 @@ class EmbeddingService {
   }
 
   /**
-   * Re-embed all chunks of a specific material with the local 384-dimensional model.
+   * Re-embed all chunks of a specific material with the Gemini 1536-dimensional model.
    *
    * @param {string|ObjectId} materialId
    * @param {Object} context - { userId, projectId }
@@ -247,7 +414,7 @@ class EmbeddingService {
   }
 
   /**
-   * Re-embed all materials in a project with the local 384-dimensional model.
+   * Re-embed all materials in a project with the Gemini 1536-dimensional model.
    *
    * @param {string|ObjectId} projectId
    * @param {Object} context - { userId }
@@ -257,11 +424,15 @@ class EmbeddingService {
     const materials = await Material.find({ projectId }).lean();
     const results = [];
     for (const mat of materials) {
-      const res = await this.generateForMaterial(mat._id, {
-        projectId,
-        userId: context.userId || mat.userId,
-        materialId: mat._id,
-      }, { forceRegenerate: true });
+      const res = await this.generateForMaterial(
+        mat._id,
+        {
+          projectId,
+          userId: context.userId || mat.userId,
+          materialId: mat._id,
+        },
+        { forceRegenerate: true }
+      );
       results.push({ materialId: mat._id, result: res });
     }
     return results;
@@ -281,10 +452,10 @@ class EmbeddingService {
         inputTokens,
         outputTokens: 0,
         success,
-        errorMessage: errorMessage ? String(errorMessage).slice(0, 300) : null,
+        errorMessage: errorMessage ? this.sanitizeError(errorMessage) : null,
       });
     } catch (err) {
-      console.warn(`[EmbeddingService] Failed to record AIUsage: ${err.message}`);
+      console.warn(`[GeminiEmbedding] Failed to record AIUsage: ${this.sanitizeError(err.message)}`);
     }
   }
 }
