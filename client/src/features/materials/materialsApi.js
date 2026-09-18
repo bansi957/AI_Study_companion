@@ -34,6 +34,7 @@ export const materialsApi = createApi({
           headers: {
             "Content-Type": "multipart/form-data",
           },
+          timeout: 180000, // 3 minutes timeout for PDF uploading and processing
         };
       },
       transformResponse: (response) => response?.data?.material ?? null,

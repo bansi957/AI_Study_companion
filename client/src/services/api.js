@@ -7,7 +7,7 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
-  timeout: 15000,
+  timeout: 60000, // 60s standard timeout for AI requests and remote queries
 });
 
 // Attach Authorization token to every outgoing request
@@ -39,10 +39,18 @@ api.interceptors.response.use(
       }
     }
 
-    const message =
+    let message =
       error.response?.data?.message ||
       error.message ||
       "An unexpected network error occurred";
+
+    if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
+      message =
+        "Request timed out. The server or file upload is taking longer than expected. Please check your connection and retry.";
+    } else if (error.code === "ERR_NETWORK") {
+      message =
+        "Unable to connect to the backend server. Please verify the backend server is running on port 3000.";
+    }
 
     return Promise.reject({ ...error, customMessage: message });
   }

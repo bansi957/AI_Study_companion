@@ -14,14 +14,20 @@ import { clearCredentials } from "../features/auth/authSlice";
 
 export const axiosBaseQuery =
   () =>
-  async ({ url, method, data, params, headers }) => {
+  async ({ url, method, data, params, headers, timeout }) => {
     try {
+      const isUpload =
+        (typeof url === "string" && url.includes("/materials/upload")) ||
+        (typeof FormData !== "undefined" && data instanceof FormData);
+      const effectiveTimeout = timeout || (isUpload ? 180000 : 60000);
+
       const result = await api({
         url,
         method,
         data,
         params,
         headers,
+        timeout: effectiveTimeout,
       });
       return { data: result.data };
     } catch (axiosError) {
