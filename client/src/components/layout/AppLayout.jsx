@@ -37,7 +37,7 @@ export const AppLayout = () => {
           >
             <Menu className="w-5 h-5" />
           </button>
-          <span className="text-sm font-semibold text-slate-200">AI Companion</span>
+          <span className="text-sm font-semibold text-slate-200">StudyMate AI</span>
           <div className="w-7" />
         </div>
 

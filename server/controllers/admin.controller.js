@@ -73,8 +73,8 @@ const getActivities = async (req, res, next) => {
  */
 const getAIUsage = async (req, res, next) => {
   try {
-    const { feature, model, startDate, endDate } = req.query;
-    const stats = await adminService.getAIUsageSummary({ feature, model, startDate, endDate });
+    const { feature, model, startDate, endDate, timeframe } = req.query;
+    const stats = await adminService.getAIUsageSummary({ feature, model, startDate, endDate, timeframe });
     return apiResponse(res, 200, "AI usage metrics retrieved successfully", stats);
   } catch (error) {
     next(error);

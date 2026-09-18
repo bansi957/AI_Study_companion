@@ -155,7 +155,7 @@ export const LoginPage = () => {
             </div>
             <div>
               <span className="text-base font-bold text-white block">
-                AI Study Companion
+                StudyMate AI
               </span>
               <span className="text-xs text-slate-400 font-medium block">
                 Learning Workspace
@@ -179,7 +179,7 @@ export const LoginPage = () => {
         </div>
 
         <div className="relative z-10 text-xs text-slate-500">
-          © {new Date().getFullYear()} AI Study Companion. Firebase Verified Security.
+          © {new Date().getFullYear()} StudyMate AI. Firebase Verified Security.
         </div>
       </div>
 
@@ -193,7 +193,7 @@ export const LoginPage = () => {
                 <GraduationCap className="w-5 h-5" />
               </div>
               <span className="text-base font-bold text-white">
-                AI Study Companion
+                StudyMate AI
               </span>
             </Link>
           </div>

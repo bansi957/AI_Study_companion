@@ -283,7 +283,7 @@ const getActivities = async ({ page = 1, limit = 20, userId, projectId, type } =
 /**
  * Get aggregated AI usage metrics by model and feature.
  */
-const getAIUsageSummary = async ({ feature, model, startDate, endDate } = {}) => {
+const getAIUsageSummary = async ({ feature, model, startDate, endDate, timeframe } = {}) => {
   const match = {};
 
   if (feature) {
@@ -293,7 +293,16 @@ const getAIUsageSummary = async ({ feature, model, startDate, endDate } = {}) =>
     match.model = model;
   }
 
-  if (startDate || endDate) {
+  const now = new Date();
+  if (timeframe === "7d" || timeframe === "1w") {
+    const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    d.setHours(0, 0, 0, 0);
+    match.createdAt = { $gte: d };
+  } else if (timeframe === "30d" || timeframe === "1m") {
+    const d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    d.setHours(0, 0, 0, 0);
+    match.createdAt = { $gte: d };
+  } else if (startDate || endDate) {
     match.createdAt = {};
     if (startDate) {
       match.createdAt.$gte = new Date(startDate);
@@ -303,7 +312,7 @@ const getAIUsageSummary = async ({ feature, model, startDate, endDate } = {}) =>
     }
   }
 
-  const [breakdown, overallTotals] = await Promise.all([
+  const [breakdown, overallTotals, dailyBreakdown] = await Promise.all([
     AIUsage.aggregate([
       { $match: match },
       {
@@ -334,6 +343,24 @@ const getAIUsageSummary = async ({ feature, model, startDate, endDate } = {}) =>
           failedRequests: { $sum: { $cond: ["$success", 0, 1] } },
         },
       },
+    ]),
+    AIUsage.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            model: "$model",
+          },
+          calls: { $sum: 1 },
+          inputTokens: { $sum: "$inputTokens" },
+          outputTokens: { $sum: "$outputTokens" },
+          estimatedCost: { $sum: "$estimatedCost" },
+          successCount: { $sum: { $cond: ["$success", 1, 0] } },
+          failureCount: { $sum: { $cond: ["$success", 0, 1] } },
+        },
+      },
+      { $sort: { "_id.date": 1, "_id.model": 1 } },
     ]),
   ]);
 
@@ -372,9 +399,113 @@ const getAIUsageSummary = async ({ feature, model, startDate, endDate } = {}) =>
     failureCount: item.failureCount,
   }));
 
+  // Build daily timeline with continuous date range
+  const dateMap = new Map();
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  if (timeframe === "7d" || timeframe === "1w" || timeframe === "30d" || timeframe === "1m") {
+    const numDays = timeframe === "7d" || timeframe === "1w" ? 7 : 30;
+    for (let i = numDays - 1; i >= 0; i--) {
+      const day = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const dStr = day.toISOString().split("T")[0];
+      const displayDate = `${monthNames[day.getMonth()]} ${day.getDate()}`;
+      dateMap.set(dStr, {
+        date: dStr,
+        displayDate,
+        models: {},
+        totalCalls: 0,
+        totalTokens: 0,
+        totalCost: 0,
+      });
+    }
+  }
+
+  dailyBreakdown.forEach((item) => {
+    const dStr = item._id.date;
+    const mName = item._id.model;
+    const calls = item.calls;
+    const tokens = item.inputTokens + item.outputTokens;
+    const cost = Number(item.estimatedCost.toFixed(6));
+
+    if (!dateMap.has(dStr)) {
+      const parts = dStr.split("-");
+      const dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      dateMap.set(dStr, {
+        date: dStr,
+        displayDate: `${monthNames[dObj.getMonth()]} ${dObj.getDate()}`,
+        models: {},
+        totalCalls: 0,
+        totalTokens: 0,
+        totalCost: 0,
+      });
+    }
+
+    const entry = dateMap.get(dStr);
+    entry.models[mName] = (entry.models[mName] || 0) + calls;
+    entry.totalCalls += calls;
+    entry.totalTokens += tokens;
+    entry.totalCost = Number((entry.totalCost + cost).toFixed(6));
+  });
+
+  const dailyTimeline = Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Extract all distinct models and calculate statistics per model
+  const distinctModelsSet = new Set();
+  dailyBreakdown.forEach((item) => distinctModelsSet.add(item._id.model));
+  breakdown.forEach((item) => distinctModelsSet.add(item._id.model));
+  const distinctModels = Array.from(distinctModelsSet).sort();
+
+  const modelStatsMap = new Map();
+  dailyBreakdown.forEach((item) => {
+    const m = item._id.model;
+    if (!modelStatsMap.has(m)) {
+      modelStatsMap.set(m, {
+        model: m,
+        totalCalls: 0,
+        totalTokens: 0,
+        totalCost: 0,
+        successCount: 0,
+        failureCount: 0,
+        activeDays: 0,
+      });
+    }
+    const stat = modelStatsMap.get(m);
+    stat.totalCalls += item.calls;
+    stat.totalTokens += item.inputTokens + item.outputTokens;
+    stat.totalCost = Number((stat.totalCost + item.estimatedCost).toFixed(6));
+    stat.successCount += item.successCount;
+    stat.failureCount += item.failureCount;
+    stat.activeDays += 1;
+  });
+
+  const modelSummaries = Array.from(modelStatsMap.values()).map((s) => ({
+    ...s,
+    avgCallsPerDay: s.activeDays > 0 ? Math.round(s.totalCalls / s.activeDays) : s.totalCalls,
+    successRate: s.totalCalls > 0 ? Math.round((s.successCount / s.totalCalls) * 100) : 100,
+  }));
+
+  // Flattened all days history list
+  const allDaysHistory = dailyBreakdown
+    .map((item) => ({
+      date: item._id.date,
+      model: item._id.model,
+      calls: item.calls,
+      tokens: item.inputTokens + item.outputTokens,
+      cost: Number(item.estimatedCost.toFixed(6)),
+      successCount: item.successCount,
+      failureCount: item.failureCount,
+      successRate: item.calls > 0 ? Math.round((item.successCount / item.calls) * 100) : 100,
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.calls - a.calls);
+
   return {
     summary,
     breakdown: formattedBreakdown,
+    dailyTimeline,
+    distinctModels,
+    modelSummaries,
+    allDaysHistory,
+    timeframe: timeframe || "all",
   };
 };
 

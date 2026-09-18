@@ -20,6 +20,8 @@ import {
   BrainCircuit,
   BarChart3,
   BookOpen,
+  Calendar,
+  DollarSign,
 } from "lucide-react";
 import {
   useGetAdminDashboardQuery,
@@ -129,6 +131,195 @@ const LineAreaChart = ({ points, height = 140, color = "#6366f1" }) => {
   );
 };
 
+/* ─────────────────── Multi-Model SVG Line Chart ─────────────────── */
+const MODEL_PALETTE = [
+  "#6366f1", // Indigo
+  "#10b981", // Emerald
+  "#f59e0b", // Amber
+  "#06b6d4", // Cyan
+  "#ec4899", // Rose
+  "#8b5cf6", // Purple
+  "#3b82f6", // Blue
+  "#14b8a6", // Teal
+];
+
+const MultiLineChart = ({ data = [], models = [], height = 260, selectedModel = "all" }) => {
+  const [hoveredPoint, setHoveredPoint] = useState(null);
+
+  if (!data || data.length === 0 || models.length === 0) {
+    return (
+      <div className="py-14 text-center text-xs text-slate-500 italic bg-slate-950/30 rounded-xl border border-slate-800">
+        No daily timeline data recorded for the selected filter.
+      </div>
+    );
+  }
+
+  const width = 760;
+  const pad = { top: 25, right: 30, bottom: 42, left: 45 };
+  const cW = width - pad.left - pad.right;
+  const cH = height - pad.top - pad.bottom;
+
+  // Max value calculation across all models or selected model
+  const activeModels = selectedModel && selectedModel !== "all" ? [selectedModel] : models;
+  let maxVal = 1;
+  data.forEach((d) => {
+    activeModels.forEach((m) => {
+      const v = d.models?.[m] || 0;
+      if (v > maxVal) maxVal = v;
+    });
+  });
+  maxVal = Math.max(Math.ceil(maxVal * 1.15), 5);
+
+  const getX = (i) => {
+    if (data.length <= 1) return pad.left + cW / 2;
+    return pad.left + (i / (data.length - 1)) * cW;
+  };
+
+  const getY = (v) => {
+    return pad.top + cH - (v / maxVal) * cH;
+  };
+
+  const tickInterval = data.length > 20 ? 4 : data.length > 10 ? 2 : 1;
+
+  return (
+    <div className="relative w-full">
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" className="overflow-visible select-none">
+        <defs>
+          {models.map((m, mi) => {
+            const color = MODEL_PALETTE[mi % MODEL_PALETTE.length];
+            return (
+              <linearGradient key={m} id={`grad-model-${mi}`} x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+                <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+              </linearGradient>
+            );
+          })}
+        </defs>
+
+        {/* Y Grid & Axis Labels */}
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const y = pad.top + cH * (1 - t);
+          const val = Math.round(maxVal * t);
+          return (
+            <g key={t}>
+              <line x1={pad.left} y1={y} x2={pad.left + cW} y2={y} stroke="#1e293b" strokeDasharray="3 3" strokeWidth="1" />
+              <text x={pad.left - 8} y={y + 3} textAnchor="end" fill="#475569" fontSize="9" fontFamily="monospace">
+                {val}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Lines for each model */}
+        {models.map((m, mi) => {
+          const color = MODEL_PALETTE[mi % MODEL_PALETTE.length];
+          const isDimmed = selectedModel && selectedModel !== "all" && selectedModel !== m;
+          const isHighlighted = selectedModel === m;
+
+          const points = data.map((d, i) => ({
+            x: getX(i),
+            y: getY(d.models?.[m] || 0),
+            val: d.models?.[m] || 0,
+            date: d.date,
+            displayDate: d.displayDate,
+          }));
+
+          const pathD = points.reduce((acc, p, i) => (i === 0 ? `M ${p.x.toFixed(1)} ${p.y.toFixed(1)}` : `${acc} L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`), "");
+          const areaD =
+            points.length > 0
+              ? `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${(pad.top + cH).toFixed(1)} L ${points[0].x.toFixed(1)} ${(pad.top + cH).toFixed(1)} Z`
+              : "";
+
+          return (
+            <g key={m} style={{ opacity: isDimmed ? 0.12 : 1, transition: "opacity 0.3s" }}>
+              {(isHighlighted || (!selectedModel || selectedModel === "all")) && (
+                <path d={areaD} fill={`url(#grad-model-${mi})`} />
+              )}
+              <path
+                d={pathD}
+                fill="none"
+                stroke={color}
+                strokeWidth={isHighlighted ? "3" : "2"}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="transition-all duration-300"
+              />
+              {points.map((p, idx) => (
+                <circle
+                  key={idx}
+                  cx={p.x}
+                  cy={p.y}
+                  r={hoveredPoint?.date === p.date && hoveredPoint?.model === m ? 5 : p.val > 0 ? 3 : 2}
+                  fill={p.val > 0 ? color : "#1e293b"}
+                  stroke={p.val > 0 ? "#0f172a" : "#334155"}
+                  strokeWidth="2"
+                  className="cursor-pointer transition-transform duration-150 hover:scale-150"
+                  onMouseEnter={() =>
+                    setHoveredPoint({
+                      date: p.date,
+                      displayDate: p.displayDate,
+                      model: m,
+                      value: p.val,
+                      color,
+                      x: p.x,
+                      y: p.y,
+                    })
+                  }
+                  onMouseLeave={() => setHoveredPoint(null)}
+                />
+              ))}
+            </g>
+          );
+        })}
+
+        {/* X Axis Date Labels */}
+        {data.map((d, i) => {
+          if (i % tickInterval !== 0 && i !== data.length - 1) return null;
+          const x = getX(i);
+          return (
+            <text
+              key={d.date}
+              x={x}
+              y={pad.top + cH + 20}
+              textAnchor="middle"
+              fill="#64748b"
+              fontSize="9"
+              fontFamily="monospace"
+            >
+              {d.displayDate || d.date}
+            </text>
+          );
+        })}
+      </svg>
+
+      {/* Tooltip Popover */}
+      {hoveredPoint && (
+        <div
+          className="pointer-events-none absolute z-20 px-3 py-2 rounded-xl bg-slate-950/95 border border-slate-700 shadow-2xl backdrop-blur-md text-xs transition-all duration-100"
+          style={{
+            left: `${Math.min(Math.max((hoveredPoint.x / width) * 100, 15), 85)}%`,
+            top: `${Math.max((hoveredPoint.y / height) * 100 - 15, 5)}%`,
+            transform: "translate(-50%, -100%)",
+          }}
+        >
+          <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between gap-3">
+            <span>{hoveredPoint.displayDate}</span>
+            <span className="text-slate-500 text-[9px]">{hoveredPoint.date}</span>
+          </div>
+          <div className="flex items-center gap-2 mt-1 font-semibold text-white">
+            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: hoveredPoint.color }} />
+            <span className="font-mono text-xs truncate max-w-[200px]">{hoveredPoint.model}</span>
+          </div>
+          <div className="mt-1.5 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-xs">
+            <span className="text-slate-400">Daily Invocations:</span>
+            <span className="font-extrabold text-indigo-300 font-mono">{hoveredPoint.value}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ─────────────────── SVG Vertical Bar Chart ─────────────────── */
 const BarChart = ({ bars, height = 140, color = "#6366f1" }) => {
   if (!bars || bars.length === 0) return null;
@@ -194,6 +385,9 @@ export const AdminDashboardPage = () => {
   const [userSearch, setUserSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [activityFilter, setActivityFilter] = useState("all");
+  const [aiTimeframe, setAiTimeframe] = useState("7d");
+  const [selectedModelFilter, setSelectedModelFilter] = useState("all");
+  const [historyModelFilter, setHistoryModelFilter] = useState("all");
 
   const { data: dashboardData, isLoading: isDashboardLoading, refetch: refetchDashboard } = useGetAdminDashboardQuery();
   const { data: usersData, isLoading: isUsersLoading, refetch: refetchUsers } = useGetAdminUsersQuery(
@@ -205,7 +399,8 @@ export const AdminDashboardPage = () => {
     { skip: activeTab !== "activity" && activeTab !== "overview" }
   );
   const { data: aiUsageData, isLoading: isAiUsageLoading, refetch: refetchAiUsage } = useGetAdminAIUsageQuery(
-    undefined, { skip: activeTab !== "ai_usage" && activeTab !== "overview" }
+    { timeframe: aiTimeframe },
+    { skip: activeTab !== "ai_usage" && activeTab !== "overview" }
   );
   const { data: healthData, isLoading: isHealthLoading, refetch: refetchHealth } = useGetAdminHealthQuery(
     undefined, { skip: activeTab !== "health" }
@@ -738,8 +933,42 @@ export const AdminDashboardPage = () => {
       ══════════════════════════════════════════════ */}
       {activeTab === "ai_usage" && (
         <div className="space-y-6">
+          {/* Header & Timeframe Filter Row */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-2xl border border-slate-800 backdrop-blur-sm">
+            <div>
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <BrainCircuit className="w-5 h-5 text-indigo-400" />
+                AI Intelligence &amp; LLM Consumption
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Monitor multi-model API distribution, request counts, tokens, and daily latency trends
+              </p>
+            </div>
+
+            {/* Timeframe Filter Buttons */}
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-950 border border-slate-800">
+              {[
+                { id: "7d", label: "1 Week" },
+                { id: "30d", label: "1 Month" },
+                { id: "all", label: "All Time" },
+              ].map((tf) => (
+                <button
+                  key={tf.id}
+                  onClick={() => setAiTimeframe(tf.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    aiTimeframe === tf.id
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/60"
+                  }`}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* KPI row — all real */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg backdrop-blur-sm">
               <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total AI Requests</div>
               <div className="text-3xl font-extrabold text-white mt-2">
@@ -749,6 +978,7 @@ export const AdminDashboardPage = () => {
                 {aiSummary.successfulRequests ?? 0} successful · {aiSummary.failedRequests ?? 0} failed
               </div>
             </div>
+
             <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg backdrop-blur-sm">
               <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Success Rate</div>
               <div className="text-3xl font-extrabold text-emerald-400 mt-2">
@@ -759,12 +989,15 @@ export const AdminDashboardPage = () => {
                 )}
               </div>
               <div className="mt-3 w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full"
-                  style={{ width: aiSummary.totalRequests > 0 ? `${Math.round((aiSummary.successfulRequests / aiSummary.totalRequests) * 100)}%` : "0%" }} />
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full transition-all duration-500"
+                  style={{ width: aiSummary.totalRequests > 0 ? `${Math.round((aiSummary.successfulRequests / aiSummary.totalRequests) * 100)}%` : "0%" }}
+                />
               </div>
             </div>
+
             <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg backdrop-blur-sm">
-              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Tokens</div>
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tokens Processed</div>
               <div className="text-3xl font-extrabold text-indigo-300 mt-2">
                 {isAiUsageLoading ? "—" : (aiSummary.totalTokens?.toLocaleString() ?? 0)}
               </div>
@@ -772,94 +1005,293 @@ export const AdminDashboardPage = () => {
                 Avg latency: {aiSummary.averageLatency ?? 0}ms
               </div>
             </div>
+
+            <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg backdrop-blur-sm">
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active LLM Models</div>
+              <div className="text-3xl font-extrabold text-purple-400 mt-2">
+                {isAiUsageLoading ? "—" : (aiUsageData?.distinctModels?.length ?? 0)}
+              </div>
+              <div className="text-xs text-slate-400 mt-1">
+                Cost: ${aiSummary.totalCost !== undefined ? aiSummary.totalCost.toFixed(4) : "0.0000"}
+              </div>
+            </div>
           </div>
 
-          {/* Model breakdown table */}
-          {(aiUsageData?.breakdown?.length ?? 0) > 0 && (
-            <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-4">
+          {/* ═══════════════════════════════════════════════════════════
+              LINE GRAPH: Daily API Calls per LLM Model
+          ══════════════════════════════════════════════════════════════ */}
+          <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-indigo-400" />
+                  Daily API Calls per LLM Model
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Number of pipeline calls dispatched per calendar day ({aiTimeframe === "7d" ? "Past 7 Days" : aiTimeframe === "30d" ? "Past 30 Days" : "All Days History"})
+                </p>
+              </div>
+
+              {/* Model Highlight / Focus Pills */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  onClick={() => setSelectedModelFilter("all")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    selectedModelFilter === "all"
+                      ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40"
+                      : "bg-slate-950/60 text-slate-400 hover:text-slate-200 border border-slate-800"
+                  }`}
+                >
+                  All Models
+                </button>
+                {(aiUsageData?.distinctModels || []).map((m, idx) => {
+                  const color = MODEL_PALETTE[idx % MODEL_PALETTE.length];
+                  const isSelected = selectedModelFilter === m;
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => setSelectedModelFilter(isSelected ? "all" : m)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        isSelected
+                          ? "bg-slate-800 text-white border border-slate-600 ring-1 ring-indigo-500"
+                          : "bg-slate-950/60 text-slate-400 hover:text-slate-200 border border-slate-800"
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                      <span className="truncate max-w-[120px]">{m.split("/").pop()}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Line Chart Graphic */}
+            <div className="bg-slate-950/50 rounded-xl border border-slate-800/80 p-5 pt-7">
+              {isAiUsageLoading ? (
+                <div className="py-20 text-center text-xs text-slate-500 animate-pulse">Loading daily model data...</div>
+              ) : (
+                <MultiLineChart
+                  data={aiUsageData?.dailyTimeline || []}
+                  models={aiUsageData?.distinctModels || []}
+                  selectedModel={selectedModelFilter}
+                  height={270}
+                />
+              )}
+            </div>
+
+            {/* Models Legend */}
+            <div className="flex items-center justify-center gap-4 flex-wrap pt-2 border-t border-slate-800/60 text-xs">
+              {(aiUsageData?.distinctModels || []).map((m, idx) => {
+                const color = MODEL_PALETTE[idx % MODEL_PALETTE.length];
+                const modelStat = (aiUsageData?.modelSummaries || []).find((s) => s.model === m);
+                return (
+                  <div key={m} className="flex items-center gap-2 bg-slate-950/40 px-3 py-1.5 rounded-lg border border-slate-800/60">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                    <span className="font-mono text-slate-300 font-medium">{m}</span>
+                    <span className="text-slate-500 font-mono text-[11px]">({modelStat?.totalCalls || 0} calls)</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ═══════════════════════════════════════════════════════════
+              LLM MODELS PERFORMANCE CARDS
+          ══════════════════════════════════════════════════════════════ */}
+          <div>
+            <div className="mb-3">
               <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-indigo-400" />
-                Breakdown by Model &amp; Feature
+                Deployed LLM Models Breakdown
               </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Aggregate API call distribution, daily frequency, and error rates per model
+              </p>
+            </div>
+
+            {(aiUsageData?.modelSummaries?.length ?? 0) === 0 ? (
+              <div className="py-10 text-center text-xs text-slate-500 italic bg-slate-950/40 rounded-xl border border-slate-800">
+                No model metrics available for this timeframe.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {(aiUsageData?.modelSummaries || []).map((mStat, idx) => {
+                  const color = MODEL_PALETTE[idx % MODEL_PALETTE.length];
+                  return (
+                    <Card
+                      key={mStat.model}
+                      className="p-4 bg-slate-900/80 border-slate-800/90 hover:border-slate-700 transition-all space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                          <span className="text-xs font-mono font-bold text-white truncate" title={mStat.model}>
+                            {mStat.model}
+                          </span>
+                        </div>
+                        <Badge
+                          variant={mStat.successRate >= 95 ? "success" : mStat.successRate >= 80 ? "warning" : "danger"}
+                          size="sm"
+                        >
+                          {mStat.successRate}% Success
+                        </Badge>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/60 text-xs">
+                        <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-800/50">
+                          <span className="text-[10px] text-slate-500 uppercase block">Total Calls</span>
+                          <span className="text-base font-extrabold text-white font-mono">{mStat.totalCalls}</span>
+                        </div>
+                        <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-800/50">
+                          <span className="text-[10px] text-slate-500 uppercase block">Avg / Day</span>
+                          <span className="text-base font-extrabold text-indigo-300 font-mono">{mStat.avgCallsPerDay}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                        <span>Tokens: <strong className="text-slate-200">{mStat.totalTokens.toLocaleString()}</strong></span>
+                        <span>Est Cost: <strong className="text-slate-200">${mStat.totalCost.toFixed(4)}</strong></span>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ═══════════════════════════════════════════════════════════
+              ALL DAYS HISTORY TABLE
+          ══════════════════════════════════════════════════════════════ */}
+          <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-emerald-400" />
+                  All-Days Invocations History
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Chronological record of model requests per day</p>
+              </div>
+
+              {/* Filter Table by Model */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Filter Model:</span>
+                <select
+                  value={historyModelFilter}
+                  onChange={(e) => setHistoryModelFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="all">All Models</option>
+                  {(aiUsageData?.distinctModels || []).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {isAiUsageLoading ? (
+              <div className="py-8 text-center text-xs text-slate-500 animate-pulse">Loading history...</div>
+            ) : (aiUsageData?.allDaysHistory || []).length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-500 italic bg-slate-950/40 rounded-xl border border-slate-800">
+                No history entries found for the selected timeframe.
+              </div>
+            ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-slate-800/80 bg-slate-950/40 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                      <th className="py-2.5 px-3">Model</th>
-                      <th className="py-2.5 px-3">Feature</th>
-                      <th className="py-2.5 px-3">Requests</th>
-                      <th className="py-2.5 px-3">Success</th>
-                      <th className="py-2.5 px-3">Avg Latency</th>
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">LLM Model</th>
+                      <th className="py-2.5 px-3">API Calls</th>
+                      <th className="py-2.5 px-3">Success / Fail</th>
                       <th className="py-2.5 px-3">Tokens</th>
+                      <th className="py-2.5 px-3">Est. Cost</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {aiUsageData.breakdown.map((item, i) => (
-                      <tr key={i} className="hover:bg-slate-800/20 transition-colors">
-                        <td className="py-2.5 px-3 text-indigo-300 font-mono text-[10px] truncate max-w-[140px]">{item.model}</td>
-                        <td className="py-2.5 px-3 text-slate-300">{item.feature}</td>
-                        <td className="py-2.5 px-3 text-white font-semibold">{item.requestCount}</td>
-                        <td className="py-2.5 px-3">
-                          <span className="text-emerald-400">{item.successCount}</span>
-                          <span className="text-slate-600"> / </span>
-                          <span className="text-rose-400">{item.failureCount}</span>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-400">{item.averageLatency}ms</td>
-                        <td className="py-2.5 px-3 text-slate-300">{item.totalTokens?.toLocaleString()}</td>
-                      </tr>
-                    ))}
+                    {(aiUsageData?.allDaysHistory || [])
+                      .filter((item) => historyModelFilter === "all" || item.model === historyModelFilter)
+                      .map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-800/20 transition-colors">
+                          <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap font-medium">
+                            {item.date}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-mono text-indigo-300 text-[11px] px-2 py-0.5 rounded bg-indigo-950/40 border border-indigo-800/40">
+                              {item.model}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-white font-mono">{item.calls}</td>
+                          <td className="py-2.5 px-3">
+                            <span className="text-emerald-400 font-medium">{item.successCount}</span>
+                            <span className="text-slate-600"> / </span>
+                            <span className="text-rose-400 font-medium">{item.failureCount}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300 font-mono">{item.tokens.toLocaleString()}</td>
+                          <td className="py-2.5 px-3 text-slate-400 font-mono">${item.cost.toFixed(4)}</td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
-              </div>
-            </div>
-          )}
-
-          {/* Bar Chart: AI invocations by feature */}
-          <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-indigo-400" />
-                AI Invocations by Feature
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">Number of AI pipeline calls per feature area</p>
-            </div>
-            {isAiUsageLoading ? (
-              <div className="py-10 text-center text-xs text-slate-500 animate-pulse">Loading AI usage...</div>
-            ) : aiTotal === 0 ? (
-              <div className="py-10 text-center text-xs text-slate-500 italic bg-slate-950/40 rounded-xl border border-slate-800">
-                No AI usage data recorded yet.
-              </div>
-            ) : (
-              <div className="bg-slate-950/40 rounded-xl border border-slate-800/80 p-4 pt-6">
-                <BarChart bars={aiFeatures.map(f => ({ label: f.name, value: f.count }))} height={180} color={true} />
               </div>
             )}
           </div>
 
-          {/* Donut: AI split */}
-          <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-4">
-            <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-indigo-400" />
-              Proportional Split
-            </h3>
-            {isAiUsageLoading ? (
-              <div className="py-8 text-center text-xs text-slate-500 animate-pulse">Loading...</div>
-            ) : aiTotal === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-500">No data yet.</div>
-            ) : (
-              <div className="flex items-center gap-8">
-                <div className="flex-shrink-0">
-                  <DonutChart
-                    segments={aiFeatures.filter(f => f.count > 0).map(f => ({ name: f.name, value: f.count, color: f.color }))}
-                    size={150} thickness={28} centerLabel={aiTotal} centerSub="total calls"
+          {/* ═══════════════════════════════════════════════════════════
+              FEATURE INVOCATIONS BAR CHART & PROPORTIONAL DONUT
+          ══════════════════════════════════════════════════════════════ */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Bar Chart: AI invocations by feature */}
+            <div className="lg:col-span-2 bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-indigo-400" />
+                  AI Invocations by Pipeline Feature
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Calls dispatched per platform module</p>
+              </div>
+              {isAiUsageLoading ? (
+                <div className="py-10 text-center text-xs text-slate-500 animate-pulse">Loading AI usage...</div>
+              ) : aiTotal === 0 ? (
+                <div className="py-10 text-center text-xs text-slate-500 italic bg-slate-950/40 rounded-xl border border-slate-800">
+                  No AI usage data recorded yet.
+                </div>
+              ) : (
+                <div className="bg-slate-950/40 rounded-xl border border-slate-800/80 p-4 pt-6">
+                  <BarChart bars={aiFeatures.map((f) => ({ label: f.name, value: f.count }))} height={180} color={true} />
+                </div>
+              )}
+            </div>
+
+            {/* Donut: AI split */}
+            <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-4">
+              <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-indigo-400" />
+                Feature Proportional Split
+              </h3>
+              {isAiUsageLoading ? (
+                <div className="py-8 text-center text-xs text-slate-500 animate-pulse">Loading...</div>
+              ) : aiTotal === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-500">No data yet.</div>
+              ) : (
+                <div className="flex flex-col items-center gap-6">
+                  <div className="flex-shrink-0">
+                    <DonutChart
+                      segments={aiFeatures.filter((f) => f.count > 0).map((f) => ({ name: f.name, value: f.count, color: f.color }))}
+                      size={140}
+                      thickness={26}
+                      centerLabel={aiTotal}
+                      centerSub="total calls"
+                    />
+                  </div>
+                  <DonutLegend
+                    segments={aiFeatures.filter((f) => f.count > 0).map((f) => ({ name: f.name, value: f.count, color: f.color }))}
+                    total={aiTotal}
                   />
                 </div>
-                <DonutLegend
-                  segments={aiFeatures.filter(f => f.count > 0).map(f => ({ name: f.name, value: f.count, color: f.color }))}
-                  total={aiTotal}
-                />
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}

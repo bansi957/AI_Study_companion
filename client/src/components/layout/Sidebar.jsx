@@ -57,7 +57,7 @@ export const Sidebar = ({ onClose }) => {
             </div>
             <div>
               <span className="text-sm font-bold tracking-tight text-white block leading-tight">
-                 AI Companion
+                StudyMate AI
               </span>
               <span className="text-[11px] text-slate-400 font-medium block">
                 Learning Workspace

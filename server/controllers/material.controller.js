@@ -9,7 +9,7 @@ const Chunk = require("../models/Chunk");
 const apiResponse = require("../utils/apiResponse");
 const { addDocumentJob } = require("../queues/document.queue");
 const activityService = require("../services/analytics/activity.service");
-const { cloudinary, isCloudinaryConfigured } = require("../config/cloudinary");
+const { cloudinary, isCloudinaryConfigured, deleteCloudinaryAsset } = require("../config/cloudinary");
 const { emitMaterialUpdate } = require("../config/socket");
 
 const uploadDir = path.join(__dirname, "../uploads");
@@ -296,16 +296,11 @@ const deleteMaterial = async (req, res, next) => {
     ]);
 
     // Delete from Cloudinary if stored in Cloudinary
-    if (material.cloudinaryPublicId && isCloudinaryConfigured()) {
-      try {
-        const resourceType = material.cloudinaryResourceType || "raw";
-        await cloudinary.uploader.destroy(material.cloudinaryPublicId, {
-          resource_type: resourceType,
-        });
-      } catch (cloudErr) {
-        console.warn(`[MaterialController] Failed to delete Cloudinary asset ${material.cloudinaryPublicId}: ${cloudErr.message}`);
-      }
-    }
+    await deleteCloudinaryAsset(
+      material.cloudinaryPublicId,
+      material.fileUrl,
+      material.cloudinaryResourceType || "raw"
+    );
 
     // Delete stored physical file if legacy local file exists (gracefully handle if missing)
     if (material.filename) {

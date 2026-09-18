@@ -3,7 +3,6 @@ const Recommendation = require("../../models/Recommendation");
 const Project = require("../../models/Project");
 const Concept = require("../../models/Concept");
 const QuizAttempt = require("../../models/QuizAttempt");
-const Assessment = require("../../models/Assessment");
 const Conversation = require("../../models/Conversation");
 const AIUsage = require("../../models/AIUsage");
 const growthService = require("../learning/growth.service");
@@ -89,10 +88,9 @@ class RecommendationService {
     );
 
     // 4. Gather student learning signals
-    const [growthData, recentAttempts, recentAssessments, recentConversations] = await Promise.all([
+    const [growthData, recentAttempts, recentConversations] = await Promise.all([
       growthService.getProjectGrowth({ userId, projectId }).catch(() => null),
-      QuizAttempt.find({ userId, projectId }).sort({ createdAt: -1 }).limit(5).lean(),
-      Assessment.find({ userId, projectId, status: "evaluated" }).sort({ createdAt: -1 }).limit(5).lean(),
+      QuizAttempt.find({ userId, projectId, completed: true }).sort({ createdAt: -1 }).limit(5).lean(),
       Conversation.find({ userId, projectId }).sort({ updatedAt: -1 }).limit(3).lean(),
     ]);
 
@@ -145,8 +143,8 @@ ${requiringAttention.map((c) => `- ${c.conceptName} (Score: ${c.currentScore}%, 
 Target Candidate Concepts to focus on:
 ${topTargets.map((c) => `- [ID: ${c._id}] ${c.name}: ${c.description || "Core concept"}`).join("\n")}
 
-Recent Assessment Results:
-${recentAssessments.map((a) => `- Score: ${a.evaluation?.score}% (${a.evaluation?.understanding || ""})`).slice(0, 3).join("\n") || "No recent assessments"}
+Recent Assessment & Quiz Results:
+${recentAttempts.map((a) => `- Score: ${a.score}% (${a.answers?.length || 0} questions)`).slice(0, 3).join("\n") || "No recent quizzes"}
 
 Generate specific, constructive recommendations that guide the student on concrete actions (e.g. review specific foundational principles, practice with a focused quiz, or explain the concept to the AI Tutor).
 

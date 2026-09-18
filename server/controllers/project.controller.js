@@ -10,6 +10,7 @@ const {
   validateCreateProject,
   validateUpdateProject,
 } = require("../validators/project.validator");
+const { deleteCloudinaryAsset } = require("../config/cloudinary");
 
 const createProject = async (req, res, next) => {
   try {
@@ -199,6 +200,24 @@ const deleteProject = async (req, res, next) => {
     const projObjectId = mongoose.Types.ObjectId.isValid(id)
       ? new mongoose.Types.ObjectId(id)
       : id;
+
+    // Purge all associated PDFs from Cloudinary first
+    try {
+      const materials = await Material.find({
+        $or: [{ projectId: id }, { projectId: projObjectId }],
+      });
+      await Promise.allSettled(
+        materials.map((mat) =>
+          deleteCloudinaryAsset(
+            mat.cloudinaryPublicId,
+            mat.fileUrl,
+            mat.cloudinaryResourceType || "raw"
+          )
+        )
+      );
+    } catch (cloudErr) {
+      console.warn(`[ProjectController] Cloudinary cleanup warning: ${cloudErr.message}`);
+    }
 
     await Promise.all([
       Material.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),

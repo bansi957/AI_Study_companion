@@ -25,7 +25,7 @@ export const LandingPage = () => {
               <GraduationCap className="w-5 h-5" />
             </div>
             <span className="text-base font-bold tracking-tight text-white">
-              AI Study Companion
+              StudyMate AI
             </span>
           </div>
 
@@ -78,7 +78,7 @@ export const LandingPage = () => {
                 <div className="w-3 h-3 rounded-full bg-amber-500/80" />
                 <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
                 <span className="text-xs text-slate-400 font-mono ml-2">
-                  app.aistudycompanion.io/spaces
+                  app.studymate.ai/spaces
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -263,11 +263,11 @@ export const LandingPage = () => {
           <div className="flex items-center gap-2">
             <GraduationCap className="w-4 h-4 text-indigo-400" />
             <span className="text-slate-400 font-medium">
-              AI Study Companion
+              StudyMate AI
             </span>
             <span>— AI-Powered Learning & Growth Workspace</span>
           </div>
-          <p>© {new Date().getFullYear()} AI Study Companion. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} StudyMate AI. All rights reserved.</p>
         </div>
       </footer>
     </div>

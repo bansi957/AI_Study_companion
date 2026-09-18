@@ -7,8 +7,7 @@ import {
   CheckCircle2,
   Clock,
   RefreshCw,
-  Eye,
-  X,
+  ExternalLink,
   FileCheck,
 } from "lucide-react";
 import { Button } from "../../../../components/ui/Button";
@@ -17,7 +16,6 @@ import { Badge } from "../../../../components/ui/Badge";
 import {
   useUploadMaterialMutation,
   useDeleteMaterialMutation,
-  useGetMaterialContentQuery,
 } from "../../../../features/materials/materialsApi";
 import {
   joinProjectRoom,
@@ -40,7 +38,6 @@ export const MaterialsTab = ({
   const handleRefresh = refetchMaterials || onRefreshMaterials;
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [previewMaterial, setPreviewMaterial] = useState(null);
   const [liveUpdates, setLiveUpdates] = useState({});
   const fileInputRef = useRef(null);
 
@@ -350,17 +347,18 @@ export const MaterialsTab = ({
                       </span>
                     )}
 
-                    {currentStatus === "READY" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        icon={Eye}
-                        onClick={() => setPreviewMaterial(mat)}
-                        className="text-slate-400 hover:text-white p-2 text-xs"
-                        title="Inspect Extracted Content"
+                    {mat.fileUrl && (
+                      <a
+                        href={mat.fileUrl.startsWith("http") ? mat.fileUrl : `http://localhost:3000${mat.fileUrl}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:text-white bg-indigo-950/60 hover:bg-indigo-900/80 rounded-lg border border-indigo-800/60 hover:border-indigo-600/80 transition-all shadow-sm group cursor-pointer"
+                        title="View PDF in Cloudinary"
                       >
-                        Inspect
-                      </Button>
+                        <FileText className="w-3.5 h-3.5 text-indigo-400 group-hover:text-indigo-300" />
+                        <span>View PDF</span>
+                        <ExternalLink className="w-3 h-3 text-indigo-400/80 group-hover:text-indigo-200" />
+                      </a>
                     )}
 
                     <Button
@@ -380,68 +378,7 @@ export const MaterialsTab = ({
           </div>
         )}
       </div>
-
-      {/* 3. Extracted Content Inspection Modal */}
-      {previewMaterial && (
-        <ContentModal
-          material={previewMaterial}
-          onClose={() => setPreviewMaterial(null)}
-        />
-      )}
     </div>
   );
 };
 
-const ContentModal = ({ material, onClose }) => {
-  const { data: contentData, isLoading } = useGetMaterialContentQuery(
-    material._id || material.id
-  );
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="min-w-0">
-            <h4 className="text-base font-bold text-white truncate">
-              {material.originalName || material.filename}
-            </h4>
-            <p className="text-xs text-slate-400">Extracted Document Structure & Segments</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
-          {isLoading ? (
-            <p className="text-slate-400 animate-pulse text-center py-8">Loading extracted segments...</p>
-          ) : !contentData?.segments || contentData.segments.length === 0 ? (
-            <p className="text-slate-500 italic text-center py-8">No extracted segments found.</p>
-          ) : (
-            contentData.segments.map((seg, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-1"
-              >
-                <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400">
-                  <span className="uppercase text-indigo-400">{seg.segmentType || "paragraph"}</span>
-                  <span>Page {seg.pageNumber || 1}</span>
-                </div>
-                <p className="text-slate-300 leading-relaxed">{seg.text}</p>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="pt-2 border-t border-slate-800 flex justify-end">
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-};

@@ -1,4 +1,4 @@
-﻿import React, { useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   TrendingUp,
   Award,
@@ -9,6 +9,11 @@ import {
   Check,
   X,
   Target,
+  FileQuestion,
+  HelpCircle,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
@@ -115,7 +120,7 @@ const LineAreaChart = ({ points, height = 180, color = "#10b981" }) => {
   );
 };
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ GitHub-style Streak Calendar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─────────────────── GitHub-style Streak Calendar ─────────────────── */
 const StreakCalendar = ({ days, streakDays }) => {
   const cellSize = 26;
   const gap = 5;
@@ -140,7 +145,7 @@ const StreakCalendar = ({ days, streakDays }) => {
           <span className="text-sm text-amber-300/70 font-medium">day streak</span>
         </div>
         <span className="text-xs text-slate-500">
-          {streakDays > 0 ? "Keep it up! ðŸ”¥" : "Start studying to build your streak"}
+          {streakDays > 0 ? "Keep it up! 🔥" : "Start studying to build your streak"}
         </span>
       </div>
 
@@ -241,6 +246,38 @@ export const AnalyticsTab = ({
 
   const totalActivitiesCount = activityDistribution.reduce((acc, a) => acc + (a.count || 0), 0);
 
+  // Quiz questions and answers history
+  const recentQuizzes = analytics?.recentQuizzes || [];
+  const [selectedQuizId, setSelectedQuizId] = useState(null);
+  const [questionFilter, setQuestionFilter] = useState("all");
+  const [expandedQuestions, setExpandedQuestions] = useState({});
+
+  const activeQuiz = useMemo(() => {
+    if (selectedQuizId) {
+      const found = recentQuizzes.find((q) => q.id === selectedQuizId);
+      if (found) return found;
+    }
+    return recentQuizzes[0] || null;
+  }, [selectedQuizId, recentQuizzes]);
+
+  const activeQuizId = activeQuiz?.id;
+  const activeQuizQuestions = activeQuiz?.questions || [];
+
+  const incorrectQuestionsInActiveQuiz = useMemo(
+    () => activeQuizQuestions.filter((q) => !q.isCorrect),
+    [activeQuizQuestions]
+  );
+  const correctQuestionsInActiveQuiz = useMemo(
+    () => activeQuizQuestions.filter((q) => q.isCorrect),
+    [activeQuizQuestions]
+  );
+
+  const filteredQuestions = useMemo(() => {
+    if (questionFilter === "incorrect") return incorrectQuestionsInActiveQuiz;
+    if (questionFilter === "correct") return correctQuestionsInActiveQuiz;
+    return activeQuizQuestions;
+  }, [questionFilter, incorrectQuestionsInActiveQuiz, correctQuestionsInActiveQuiz, activeQuizQuestions]);
+
   // Activity Pie segments
   const activityColors = ["#a855f7", "#10b981", "#6366f1", "#f59e0b", "#3b82f6"];
   const activitySegments = useMemo(
@@ -331,7 +368,7 @@ export const AnalyticsTab = ({
             </div>
           </div>
           <div className="text-3xl font-extrabold text-blue-400">
-            {totalQuestionsAnswered > 0 ? `${questionAccuracyPercent}%` : "â€”"}
+            {totalQuestionsAnswered > 0 ? `${questionAccuracyPercent}%` : "0%"}
           </div>
           <div className="text-xs text-slate-400 mt-1">
             {totalQuestionsAnswered > 0
@@ -510,7 +547,315 @@ export const AnalyticsTab = ({
         )}
       </div>
 
-      {/* â”€â”€ 6. Recent Activity Feed â”€â”€ */}
+      {/* ── 6. Quiz Questions & Answers History ── */}
+      <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+              <FileQuestion className="w-4 h-4 text-indigo-400" />
+              Quiz Questions &amp; Answers History
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Review completed quiz questions, your answers, correct solutions, and AI explanations
+            </p>
+          </div>
+
+          {/* Question Filter Pills */}
+          {activeQuizQuestions.length > 0 && (
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-950 border border-slate-800">
+              <button
+                onClick={() => setQuestionFilter("all")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  questionFilter === "all"
+                    ? "bg-indigo-600 text-white"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                All ({activeQuizQuestions.length})
+              </button>
+              <button
+                onClick={() => setQuestionFilter("incorrect")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  questionFilter === "incorrect"
+                    ? "bg-rose-600 text-white"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Needs Review ({incorrectQuestionsInActiveQuiz.length})
+              </button>
+              <button
+                onClick={() => setQuestionFilter("correct")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  questionFilter === "correct"
+                    ? "bg-emerald-600 text-white"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Correct ({correctQuestionsInActiveQuiz.length})
+              </button>
+            </div>
+          )}
+        </div>
+
+        {recentQuizzes.length === 0 ? (
+          <div className="py-12 text-center text-xs text-slate-500 italic bg-slate-950/40 rounded-xl border border-slate-800 space-y-3">
+            <HelpCircle className="w-8 h-8 text-slate-600 mx-auto" />
+            <p className="text-slate-400 font-medium">No quiz attempts recorded for this workspace yet.</p>
+            <p className="text-slate-500 max-w-sm mx-auto">
+              Take an adaptive quiz to practice concept retention, evaluate questions, and inspect detailed answers here.
+            </p>
+            {onSwitchTab && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onSwitchTab("quiz")}
+                className="mt-2 text-xs text-indigo-300 border-indigo-700/50 hover:bg-indigo-950/40"
+              >
+                Start Practice Quiz →
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Quiz Attempt Switcher */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
+              <span className="text-xs text-slate-500 font-medium shrink-0">Attempts:</span>
+              {recentQuizzes.map((quiz, idx) => {
+                const isSelected = activeQuizId === quiz.id;
+                const score = quiz.score ?? 0;
+                return (
+                  <button
+                    key={quiz.id}
+                    onClick={() => {
+                      setSelectedQuizId(quiz.id);
+                      setQuestionFilter("all");
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
+                      isSelected
+                        ? "bg-slate-800 text-white border border-indigo-500/80 shadow-md shadow-indigo-950/40"
+                        : "bg-slate-950/60 text-slate-400 hover:text-slate-200 border border-slate-800/80"
+                    }`}
+                  >
+                    <span>{quiz.quizName || `Attempt #${recentQuizzes.length - idx}`}</span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                        score >= 75
+                          ? "bg-emerald-950/80 text-emerald-300 border border-emerald-700/60"
+                          : score >= 50
+                          ? "bg-amber-950/80 text-amber-300 border border-amber-700/60"
+                          : "bg-rose-950/80 text-rose-300 border border-rose-700/60"
+                      }`}
+                    >
+                      {score}%
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Active Quiz Meta Banner */}
+            {activeQuiz && (
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="space-y-0.5">
+                  <div className="font-semibold text-white flex items-center gap-2">
+                    <span>{activeQuiz.quizName}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-950/80 text-indigo-300 border border-indigo-700/60">
+                      {activeQuiz.indicatorLabel}
+                    </span>
+                  </div>
+                  <p className="text-slate-400 text-[11px]">
+                    Completed {activeQuiz.date ? new Date(activeQuiz.date).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Recently"}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-4 text-slate-300">
+                  <div className="text-center sm:text-right">
+                    <span className="text-[10px] text-slate-500 uppercase block">Score</span>
+                    <span className={`font-bold font-mono text-sm ${activeQuiz.score >= 75 ? "text-emerald-400" : activeQuiz.score >= 50 ? "text-amber-400" : "text-rose-400"}`}>
+                      {activeQuiz.score}%
+                    </span>
+                  </div>
+                  <div className="text-center sm:text-right">
+                    <span className="text-[10px] text-slate-500 uppercase block">Questions</span>
+                    <span className="font-bold font-mono text-sm text-slate-200">
+                      {activeQuizQuestions.length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Questions List */}
+            {filteredQuestions.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-500 italic bg-slate-950/30 rounded-xl border border-slate-800">
+                No questions match the "{questionFilter}" filter for this attempt.
+              </div>
+            ) : (
+              <div className="space-y-3.5">
+                {filteredQuestions.map((q) => {
+                  const isExpanded = expandedQuestions[q.questionId] !== false; // default expanded
+                  return (
+                    <div
+                      key={q.questionId || q.questionNumber}
+                      className={`rounded-xl border transition-all overflow-hidden ${
+                        q.isCorrect
+                          ? "bg-slate-950/40 border-emerald-900/30 hover:border-emerald-700/50"
+                          : "bg-slate-950/40 border-rose-900/40 hover:border-rose-700/60"
+                      }`}
+                    >
+                      {/* Question Header */}
+                      <div
+                        onClick={() =>
+                          setExpandedQuestions((prev) => ({
+                            ...prev,
+                            [q.questionId]: !isExpanded,
+                          }))
+                        }
+                        className="p-4 flex items-start justify-between gap-3 cursor-pointer hover:bg-slate-900/40 transition-colors"
+                      >
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div
+                            className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold ${
+                              q.isCorrect
+                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                            }`}
+                          >
+                            {q.isCorrect ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                          </div>
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                              <span className="font-bold text-slate-300">Question {q.questionNumber}</span>
+                              {q.topic && (
+                                <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px]">
+                                  {q.topic}
+                                </span>
+                              )}
+                              {q.difficulty && (
+                                <span className="capitalize text-slate-500 text-[10px]">• {q.difficulty}</span>
+                              )}
+                            </div>
+                            <p className="text-sm font-medium text-slate-100 leading-relaxed">
+                              {q.questionText}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Badge
+                            variant={q.isCorrect ? "success" : "danger"}
+                            size="sm"
+                          >
+                            {q.isCorrect ? "Correct" : "Needs Review"}
+                          </Badge>
+                          <div className="text-slate-500 hover:text-slate-300 p-1">
+                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Collapsible Question Detail */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 pt-1 border-t border-slate-900 space-y-3 text-xs">
+                          {/* Options Breakdown for Multiple Choice */}
+                          {q.options && q.options.length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              <span className="text-[10px] text-slate-400 uppercase font-semibold block">
+                                Answer Options
+                              </span>
+                              <div className="grid grid-cols-1 gap-1.5">
+                                {q.options.map((opt, optIdx) => {
+                                  const isSelectedByUser =
+                                    typeof q.userAnswer === "string" &&
+                                    q.userAnswer.trim().toLowerCase() === opt.trim().toLowerCase();
+                                  const isTheCorrectAnswer =
+                                    typeof q.correctAnswer === "string" &&
+                                    q.correctAnswer.trim().toLowerCase() === opt.trim().toLowerCase();
+
+                                  let optClasses = "bg-slate-900/60 border-slate-800 text-slate-300";
+                                  let label = null;
+
+                                  if (isSelectedByUser && q.isCorrect) {
+                                    optClasses = "bg-emerald-950/40 border-emerald-600/50 text-emerald-200 font-medium";
+                                    label = (
+                                      <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                                        <Check className="w-3 h-3" /> Your Answer (Correct)
+                                      </span>
+                                    );
+                                  } else if (isSelectedByUser && !q.isCorrect) {
+                                    optClasses = "bg-rose-950/40 border-rose-600/50 text-rose-200 font-medium";
+                                    label = (
+                                      <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
+                                        <X className="w-3 h-3" /> Your Answer (Incorrect)
+                                      </span>
+                                    );
+                                  } else if (isTheCorrectAnswer) {
+                                    optClasses = "bg-emerald-950/30 border-emerald-600/40 text-emerald-300 font-medium";
+                                    label = (
+                                      <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                                        <Check className="w-3 h-3" /> Correct Solution
+                                      </span>
+                                    );
+                                  }
+
+                                  return (
+                                    <div
+                                      key={optIdx}
+                                      className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 text-xs transition-colors ${optClasses}`}
+                                    >
+                                      <span>{opt}</span>
+                                      {label}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Open-Ended or non-option format answers */}
+                          {(!q.options || q.options.length === 0) && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                              <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1">
+                                <span className="text-[10px] text-slate-400 uppercase font-semibold block">
+                                  Your Answer
+                                </span>
+                                <p className="text-slate-200">{q.userAnswer}</p>
+                              </div>
+                              {q.correctAnswer && (
+                                <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-800/40 space-y-1">
+                                  <span className="text-[10px] text-emerald-400 uppercase font-semibold block">
+                                    Target Solution
+                                  </span>
+                                  <p className="text-emerald-200">{q.correctAnswer}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* AI Explanation & Feedback */}
+                          {(q.explanation || q.feedback) && (
+                            <div className="p-3 rounded-xl bg-indigo-950/25 border border-indigo-800/40 space-y-1">
+                              <div className="flex items-center gap-1.5 text-indigo-300 font-semibold text-[11px]">
+                                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                                <span>Explanation &amp; Concept Insight</span>
+                              </div>
+                              <p className="text-slate-300 leading-relaxed text-xs">
+                                {q.explanation || q.feedback}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── 7. Recent Learning Activity ── */}
       <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-4">
         <div className="flex items-center justify-between">
           <div>

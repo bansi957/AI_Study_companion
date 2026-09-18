@@ -4,7 +4,6 @@ const Project = require("../../models/Project");
 const Material = require("../../models/Material");
 const Quiz = require("../../models/Quiz");
 const QuizAttempt = require("../../models/QuizAttempt");
-const Assessment = require("../../models/Assessment");
 const Concept = require("../../models/Concept");
 const Mastery = require("../../models/Mastery");
 const MasteryHistory = require("../../models/MasteryHistory");
@@ -109,7 +108,6 @@ class AnalyticsService {
       materials,
       quizzesCount,
       quizAttempts,
-      assessments,
       concepts,
       masteries,
       masteryHistories,
@@ -122,7 +120,6 @@ class AnalyticsService {
         .populate("quizId", "difficulty totalQuestions questions selectionReason")
         .sort({ completedAt: -1, createdAt: -1 })
         .lean(),
-      Assessment.find({ projectId: pId, userId: uId }).lean(),
       knowledgeService.getConceptsByProject(pId),
       Mastery.find({ projectId: pId, userId: uId }).lean(),
       MasteryHistory.find({ projectId: pId, userId: uId }).sort({ createdAt: 1 }).lean(),
@@ -163,7 +160,7 @@ class AnalyticsService {
     }
 
     // Recent Quizzes with detail
-    const recentQuizzes = quizAttempts.slice(0, 10).map((qa, index) => {
+    const recentQuizzes = quizAttempts.slice(0, 15).map((qa, index) => {
       const quizObj = qa.quizId;
       const questionsCount =
         qa.answers?.length || quizObj?.totalQuestions || quizObj?.questions?.length || 5;
@@ -191,6 +188,41 @@ class AnalyticsService {
         indicatorLabel = "Needs Review";
       }
 
+      // Match each answer with its corresponding question
+      const questionMap = new Map();
+      if (Array.isArray(quizObj?.questions)) {
+        quizObj.questions.forEach((q) => {
+          if (q && q._id) questionMap.set(q._id.toString(), q);
+        });
+      }
+
+      const questionsList = [];
+      if (Array.isArray(qa.answers)) {
+        qa.answers.forEach((ans, qIdx) => {
+          const qDoc = ans.questionId ? questionMap.get(ans.questionId.toString()) : quizObj?.questions?.[qIdx];
+          const isCorrect =
+            ans.isCorrect === true ||
+            (typeof ans.score === "number" && ans.score >= 0.7) ||
+            (qDoc?.correctAnswer && ans.answer && qDoc.correctAnswer.trim().toLowerCase() === ans.answer.trim().toLowerCase());
+
+          questionsList.push({
+            questionNumber: qIdx + 1,
+            questionId: ans.questionId || qDoc?._id,
+            questionText: qDoc?.question || `Question ${qIdx + 1}`,
+            type: qDoc?.type || "mcq",
+            options: Array.isArray(qDoc?.options) ? qDoc.options : [],
+            userAnswer: ans.answer || "No answer submitted",
+            correctAnswer: qDoc?.correctAnswer || null,
+            isCorrect: !!isCorrect,
+            score: typeof ans.score === "number" ? Math.round(ans.score) : (isCorrect ? 100 : 0),
+            feedback: ans.feedback || qDoc?.explanation || "",
+            explanation: qDoc?.explanation || ans.feedback || "",
+            topic: qDoc?.topic || null,
+            difficulty: qDoc?.difficulty || "medium",
+          });
+        });
+      }
+
       return {
         id: qa._id,
         quizId: quizObj?._id || qa.quizId,
@@ -200,6 +232,7 @@ class AnalyticsService {
         totalQuestions: questionsCount,
         indicator,
         indicatorLabel,
+        questions: questionsList,
       };
     });
 
@@ -278,16 +311,10 @@ class AnalyticsService {
       count,
     }));
 
-    // Assessment metrics
-    const totalAssessments = assessments.length;
-    const evaluatedAssessments = assessments.filter((a) => a.status === "evaluated");
-    const assessedScoreSum = evaluatedAssessments.reduce(
-      (sum, a) => sum + (a.evaluation && typeof a.evaluation.score === "number" ? a.evaluation.score : 0),
-      0
-    );
-    const averageAssessmentScore = evaluatedAssessments.length > 0
-      ? Math.round(assessedScoreSum / evaluatedAssessments.length)
-      : 0;
+    // Assessment metrics (derived from adaptive quiz attempts)
+    const totalAssessments = quizAttemptsCount;
+    const evaluatedAssessments = quizAttemptsCount;
+    const averageAssessmentScore = averageQuizScore;
 
     // Concept & Mastery metrics
     const totalConcepts = concepts.length;
@@ -412,30 +439,53 @@ class AnalyticsService {
 
     const uId = new mongoose.Types.ObjectId(userId);
 
+    // Fetch user's projects to locate all related concepts
+    const userProjects = await Project.find({ userId: uId }).select("_id name").lean();
+    const userProjectIds = userProjects.map((p) => p._id);
+
     // Parallel queries across all user's spaces and projects
     const [
       totalSpaces,
-      totalProjects,
       materials,
       totalQuizzes,
       quizAttempts,
-      assessments,
       masteries,
       recommendations,
       masteryHistories,
       activities,
+      conceptDocs,
     ] = await Promise.all([
       Space.countDocuments({ userId: uId }),
-      Project.countDocuments({ userId: uId }),
       Material.find({ userId: uId }).lean(),
       Quiz.countDocuments({ userId: uId }),
       QuizAttempt.find({ userId: uId, completed: true }).lean(),
-      Assessment.find({ userId: uId }).lean(),
-      Mastery.find({ userId: uId }).populate("conceptId", "name projectId").lean(),
+      Mastery.find({ userId: uId }).lean(),
       Recommendation.find({ userId: uId }).lean(),
       MasteryHistory.find({ userId: uId }).sort({ createdAt: 1 }).lean(),
       Activity.find({ userId: uId }).sort({ createdAt: -1 }).limit(50).lean(),
+      Concept.find({
+        $or: [{ userId: uId }, { projectId: { $in: userProjectIds } }],
+      }).lean(),
     ]);
+
+    const totalProjects = userProjects.length;
+
+    // Build lookup map for concept subdocuments
+    const conceptMap = new Map();
+    conceptDocs.forEach((doc) => {
+      if (Array.isArray(doc.concepts)) {
+        doc.concepts.forEach((c) => {
+          if (c && c._id) {
+            conceptMap.set(c._id.toString(), {
+              _id: c._id,
+              name: c.name,
+              projectId: doc.projectId,
+              importance: c.importance || 3,
+            });
+          }
+        });
+      }
+    });
 
     // Material stats
     const totalMaterials = materials.length;
@@ -446,37 +496,62 @@ class AnalyticsService {
     const quizScoreSum = quizAttempts.reduce((sum, a) => sum + (Number(a.score) || 0), 0);
     const averageQuizScore = totalQuizAttempts > 0 ? Math.round(quizScoreSum / totalQuizAttempts) : 0;
 
-    // Assessment stats
-    const totalAssessments = assessments.length;
-    const evaluatedAssessments = assessments.filter((a) => a.status === "evaluated");
-    const evalScoreSum = evaluatedAssessments.reduce(
-      (sum, a) => sum + (a.evaluation && typeof a.evaluation.score === "number" ? a.evaluation.score : 0),
-      0
-    );
-    const averageAssessmentScore = evaluatedAssessments.length > 0
-      ? Math.round(evalScoreSum / evaluatedAssessments.length)
-      : 0;
+    // Assessment stats (derived from adaptive quiz attempts)
+    const totalAssessments = totalQuizAttempts;
+    const evaluatedAssessments = totalQuizAttempts;
+    const averageAssessmentScore = averageQuizScore;
 
     // Mastery stats
     const masteryScoreSum = masteries.reduce((sum, m) => sum + (Number(m.score) || 0), 0);
     const averageMastery = masteries.length > 0 ? Math.round(masteryScoreSum / masteries.length) : 0;
 
-    // Strongest and weakest concepts
+    // Strongest and weakest concepts with live concept names from DB
     const sortedMasteries = [...masteries].sort((a, b) => (b.score || 0) - (a.score || 0));
 
-    const strongestConcepts = sortedMasteries.slice(0, 5).map((m) => ({
-      conceptId: m.conceptId?._id || m.conceptId,
-      conceptName: m.conceptId?.name || "Concept",
-      score: m.score,
-      confidence: m.confidence,
-    }));
+    const strongestConcepts = sortedMasteries.slice(0, 5).map((m) => {
+      const cInfo = conceptMap.get(m.conceptId?.toString());
+      return {
+        conceptId: m.conceptId,
+        conceptName: cInfo?.name || "Concept",
+        projectId: m.projectId || cInfo?.projectId,
+        score: m.score,
+        confidence: m.confidence,
+      };
+    });
 
-    const weakestConcepts = [...sortedMasteries].reverse().slice(0, 5).map((m) => ({
-      conceptId: m.conceptId?._id || m.conceptId,
-      conceptName: m.conceptId?.name || "Concept",
-      score: m.score,
-      confidence: m.confidence,
-    }));
+    // Weakest concepts (prioritizing assessed concepts with low scores, then unassessed concepts)
+    const weakestMasteries = [...masteries]
+      .sort((a, b) => (a.score || 0) - (b.score || 0))
+      .slice(0, 10)
+      .map((m) => {
+        const cInfo = conceptMap.get(m.conceptId?.toString());
+        return {
+          conceptId: m.conceptId,
+          conceptName: cInfo?.name || "Concept",
+          projectId: m.projectId || cInfo?.projectId,
+          score: m.score,
+          confidence: m.confidence,
+          assessed: true,
+        };
+      });
+
+    let weakestConcepts = weakestMasteries;
+    if (weakestConcepts.length < 5) {
+      const assessedConceptIds = new Set(masteries.map((m) => m.conceptId?.toString()));
+      for (const [cid, cInfo] of conceptMap.entries()) {
+        if (!assessedConceptIds.has(cid)) {
+          weakestConcepts.push({
+            conceptId: cInfo._id,
+            conceptName: cInfo.name,
+            projectId: cInfo.projectId,
+            score: 0,
+            confidence: 0,
+            assessed: false,
+          });
+          if (weakestConcepts.length >= 5) break;
+        }
+      }
+    }
 
     // Recommendation stats
     const completedRecommendations = recommendations.filter((r) => r.status === "completed").length;

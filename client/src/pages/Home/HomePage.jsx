@@ -185,8 +185,8 @@ export const HomePage = () => {
           <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
             {getGreeting()}, {user?.name?.split(" ")[0] || "Learner"}
           </h1>
-          <p className="text-sm text-slate-400 mt-1 leading-relaxed">
-            Welcome to your AI-powered study companion. Track concept mastery and continue learning.
+          <p className="text-sm text-slate-400">
+            Welcome to StudyMate AI. Track concept mastery and continue learning.
           </p>
         </div>
 
@@ -465,18 +465,19 @@ export const HomePage = () => {
                     </div>
 
                     <div className="space-y-2">
-                      {attentionAreas.slice(0, 3).map((concept, idx) => (
-                        <div
+                      {attentionAreas.slice(0, 4).map((concept, idx) => (
+                        <Link
                           key={idx}
-                          className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between"
+                          to={`/projects/${concept.projectId || currentProject?._id}?tab=tutor`}
+                          className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between hover:border-amber-500/40 hover:bg-slate-900/60 transition-colors group"
                         >
-                          <span className="text-xs font-medium text-slate-200 truncate pr-2">
+                          <span className="text-xs font-medium text-slate-200 truncate pr-2 group-hover:text-amber-300 transition-colors">
                             {concept.conceptName}
                           </span>
                           <span className="text-xs font-bold text-amber-400 flex-shrink-0">
-                            {concept.score}%
+                            {concept.assessed === false ? "Unassessed" : `${concept.score}%`}
                           </span>
-                        </div>
+                        </Link>
                       ))}
                     </div>
 
