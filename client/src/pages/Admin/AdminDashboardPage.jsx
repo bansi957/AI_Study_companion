@@ -663,7 +663,7 @@ export const AdminDashboardPage = () => {
                   No AI usage data available yet.
                 </div>
               ) : (
-                <div className="flex items-center gap-6">
+                <div className="flex flex-col sm:flex-row items-center gap-6">
                   <div className="flex-shrink-0">
                     <DonutChart
                       segments={aiFeatures.filter(f => f.count > 0).map(f => ({ name: f.name, value: f.count, color: f.color }))}
@@ -693,7 +693,7 @@ export const AdminDashboardPage = () => {
                   No activity data yet.
                 </div>
               ) : (
-                <div className="flex items-center gap-6">
+                <div className="flex flex-col sm:flex-row items-center gap-6">
                   <div className="flex-shrink-0">
                     <DonutChart segments={activityPieSegments} size={140} thickness={26} centerLabel={totalActivityEvents} centerSub="events" />
                   </div>

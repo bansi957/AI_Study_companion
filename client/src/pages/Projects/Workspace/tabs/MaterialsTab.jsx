@@ -257,17 +257,6 @@ export const MaterialsTab = ({
         </div>
       </div>
 
-      {/* Processing Notice Banner */}
-      <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-950/20 border border-amber-800/40 text-amber-200/90 text-xs">
-        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-        <div className="space-y-0.5">
-          <p className="font-semibold text-amber-300">Processing & Embedding Notice</p>
-          <p className="text-amber-200/80 leading-relaxed">
-            Note: For documents with more pages, PDF text extraction, concept discovery, and vector embedding takes several minutes. The background pipeline will automatically update the status from <em>Queued</em> to <em>Ready</em> once finished.
-          </p>
-        </div>
-      </div>
-
       {/* 2. Materials List */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -323,13 +312,13 @@ export const MaterialsTab = ({
 
                     <div className="min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-bold text-white truncate max-w-xs sm:max-w-md">
+                        <p className="text-sm font-bold text-white truncate max-w-[170px] xs:max-w-xs sm:max-w-md">
                           {mat.originalName || mat.filename}
                         </p>
                         {getStatusBadge(currentStatus, currentStage)}
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-slate-400">
                         <span>{formatFileSize(mat.fileSize)}</span>
                         <span>•</span>
                         <span>
@@ -350,7 +339,7 @@ export const MaterialsTab = ({
                   </div>
 
                   {/* Actions & Status Progress */}
-                  <div className="flex items-center gap-2 self-end sm:self-center flex-shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 justify-end sm:justify-start self-end sm:self-center flex-shrink-0">
                     {isQueued && (
                       <span className="flex items-center gap-1.5 text-xs text-amber-300 font-medium bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-800/50">
                         <Clock className="w-3.5 h-3.5 animate-pulse text-amber-400" />

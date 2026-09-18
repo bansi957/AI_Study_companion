@@ -22,23 +22,23 @@ export const TopNav = ({ onMenuClick }) => {
   };
 
   return (
-    <header className="h-16 border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between sticky top-0 z-20">
-      <div className="flex items-center gap-3">
+    <header className="h-16 border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-md px-3 sm:px-6 flex items-center justify-between sticky top-0 z-20">
+      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
         <button
           onClick={onMenuClick}
           aria-label="Toggle navigation menu"
-          className="lg:hidden p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+          className="lg:hidden p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors shrink-0"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        <h2 className="text-sm sm:text-base font-semibold text-slate-200">
+        <h2 className="text-sm sm:text-base font-semibold text-slate-200 truncate max-w-[150px] xs:max-w-xs sm:max-w-none">
           {getPageTitle()}
         </h2>
       </div>
 
       {!isAdmin && (
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <Link to="/spaces/new">
             <Button variant="secondary" size="sm" icon={FolderPlus}>
               <span className="hidden sm:inline">New Space</span>

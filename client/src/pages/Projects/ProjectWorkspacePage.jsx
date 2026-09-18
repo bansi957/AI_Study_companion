@@ -206,13 +206,13 @@ export const ProjectWorkspacePage = () => {
             <span className="text-slate-500">Space</span>
           )}
           <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
-          <span className="text-white font-semibold truncate max-w-xs sm:max-w-md">
+          <span className="text-white font-semibold truncate max-w-[140px] xs:max-w-xs sm:max-w-md">
             {project.name}
           </span>
         </nav>
 
         {/* Project Header Banner */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-900/95 to-slate-900 border border-slate-800/90 p-6 sm:p-7 shadow-xl">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-900/95 to-slate-900 border border-slate-800/90 p-5 sm:p-7 shadow-xl">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-2.5 max-w-3xl">
               <div className="flex flex-wrap items-center gap-2.5">
@@ -251,7 +251,7 @@ export const ProjectWorkspacePage = () => {
             </div>
 
             {/* Quick Primary Actions in Header */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <Button
                 variant="outline"
                 size="sm"
@@ -287,7 +287,7 @@ export const ProjectWorkspacePage = () => {
       </div>
 
       {/* 2. TABBED NAVIGATION STRIP */}
-      <div className="border-b border-slate-800/80 sticky top-0 z-20 bg-slate-950/80 backdrop-blur-md -mx-4 px-4 sm:mx-0 sm:px-0">
+      <div className="border-b border-slate-800/80 sticky top-0 z-20 bg-slate-950/80 backdrop-blur-md -mx-3 px-3 sm:mx-0 sm:px-0">
         {/* Active Assessment Warning Banner */}
         {isAssessmentActive && (
           <div className="bg-amber-950/60 border-b border-amber-800/50 px-4 py-2 flex items-center justify-between text-xs text-amber-200 animate-fade-in">

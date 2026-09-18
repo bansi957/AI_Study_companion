@@ -430,7 +430,7 @@ export const AnalyticsTab = ({
             <p className="text-xs text-slate-400 mt-0.5">Chronological score trend across completed quiz attempts</p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => onSwitchTab?.("quiz")} className="text-xs text-indigo-400 hover:text-indigo-300">
-            Take New Quiz â†’
+            Take New Quiz →
           </Button>
         </div>
         {quizLinePoints.length === 0 ? (
@@ -444,7 +444,7 @@ export const AnalyticsTab = ({
         )}
       </div>
 
-      {/* â”€â”€ 4. Two-Column: Activity Pie + Mastery Donut â”€â”€ */}
+      {/* ── 4. Two-Column: Activity Pie + Mastery Donut ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Activity Distribution Donut */}
@@ -461,7 +461,7 @@ export const AnalyticsTab = ({
               No study activity logged yet.
             </div>
           ) : (
-            <div className="flex items-center gap-6">
+            <div className="flex flex-col sm:flex-row items-center gap-6">
               <div className="flex-shrink-0">
                 <DonutChart segments={activitySegments} size={150} thickness={28} centerLabel={totalActivitiesCount} centerSub="events" />
               </div>
@@ -484,7 +484,7 @@ export const AnalyticsTab = ({
               No concepts recorded. Upload study materials to begin tracking.
             </div>
           ) : (
-            <div className="flex items-center gap-6">
+            <div className="flex flex-col sm:flex-row items-center gap-6">
               <div className="flex-shrink-0">
                 <DonutChart segments={masterySegments} size={150} thickness={28} centerLabel={concepts.length} centerSub="concepts" />
               </div>
@@ -494,7 +494,7 @@ export const AnalyticsTab = ({
         </div>
       </div>
 
-      {/* â”€â”€ 5. Question Accuracy Breakdown â”€â”€ */}
+      {/* ── 5. Question Accuracy Breakdown ── */}
       <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 shadow-xl backdrop-blur-sm space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -512,7 +512,7 @@ export const AnalyticsTab = ({
             No questions answered yet. Take a quiz to evaluate accuracy.
           </div>
         ) : (
-          <div className="flex items-center gap-6">
+          <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="flex-shrink-0">
               <DonutChart
                 segments={[
@@ -562,7 +562,7 @@ export const AnalyticsTab = ({
 
           {/* Question Filter Pills */}
           {activeQuizQuestions.length > 0 && (
-            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-950 border border-slate-800">
+            <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-slate-950 border border-slate-800">
               <button
                 onClick={() => setQuestionFilter("all")}
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${

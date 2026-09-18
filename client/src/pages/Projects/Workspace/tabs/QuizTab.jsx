@@ -704,8 +704,8 @@ export const QuizTab = ({
         <div className="max-w-3xl mx-auto space-y-6">
           {/* Progress Header */}
           <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="bg-indigo-950/40 text-indigo-300 border-indigo-700/40 text-xs">
                   Question {currentQuestionIndex + 1} of {activeQuiz.questions.length}
                 </Badge>
@@ -724,7 +724,7 @@ export const QuizTab = ({
                 </Badge>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 shrink-0">
                 <span className="text-xs text-slate-400 font-medium hidden sm:inline">
                   {Math.round(((currentQuestionIndex + 1) / activeQuiz.questions.length) * 100)}% Complete
                 </span>
@@ -758,9 +758,9 @@ export const QuizTab = ({
             const isOE = currentQ?.type === "open-ended" || currentQ?.type === "open_ended";
 
             return (
-              <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-6 sm:p-8 shadow-xl space-y-6">
+              <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 sm:p-8 shadow-xl space-y-6">
                 {/* Concept & Topic Badge */}
-                <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 border-b border-slate-800 pb-3">
                   <div className="flex items-center gap-1.5">
                     <Target className="w-3.5 h-3.5 text-indigo-400" />
                     <span>Concept: <strong className="text-slate-200">{currentQ?.topic || "Core Concept"}</strong></span>

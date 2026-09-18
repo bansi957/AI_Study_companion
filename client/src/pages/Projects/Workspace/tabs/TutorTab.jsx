@@ -507,9 +507,9 @@ export const TutorTab = ({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in pb-12">
       {/* Main Chat Thread Area */}
-      <div className="lg:col-span-8 flex flex-col h-[740px] bg-slate-900/80 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-sm">
+      <div className="lg:col-span-8 flex flex-col h-[580px] sm:h-[680px] lg:h-[740px] bg-slate-900/80 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-sm">
         {/* Chat Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80 bg-slate-900/90">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-4 border-b border-slate-800/80 bg-slate-900/90">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
               <Bot className="w-5 h-5" />
