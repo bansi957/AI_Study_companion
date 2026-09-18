@@ -34,8 +34,8 @@ const startDocumentWorker = () => {
   const knw = startKnowledgeWorker();
 
   console.log(`[Workers] All decoupled document workers active:`);
-  console.log(` - Extraction Queue: ${EXTRACTION_QUEUE_NAME} (concurrency: 2)`);
-  console.log(` - Embedding Queue: ${EMBEDDING_QUEUE_NAME} (concurrency: 2)`);
+  console.log(` - Extraction Queue: ${EXTRACTION_QUEUE_NAME} (concurrency: 1)`);
+  console.log(` - Embedding Queue: ${EMBEDDING_QUEUE_NAME} (concurrency: 1)`);
   console.log(` - Knowledge Queue: ${KNOWLEDGE_QUEUE_NAME} (concurrency: 1)`);
 
   return {

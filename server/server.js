@@ -12,7 +12,6 @@ const env = loadEnv();
 const connectDB = require("./config/db");
 const { initSocket } = require("./config/socket");
 const errorMiddleware = require("./middleware/error.middleware");
-const { startDocumentWorker, closeDocumentWorker } = require("./workers/document.worker");
 
 const authRoutes = require("./routes/auth.routes");
 const spaceRoutes = require("./routes/space.routes");
@@ -82,20 +81,15 @@ const startServer = () => {
     console.log(`Server running on port ${env.port} with Socket.io active`);
   });
 
-  // Start background document processing worker
-  startDocumentWorker();
-
   return server;
 };
 
 // Graceful shutdown
-process.on("SIGINT", async () => {
-  await closeDocumentWorker().catch(() => {});
+process.on("SIGINT", () => {
   process.exit(0);
 });
 
-process.on("SIGTERM", async () => {
-  await closeDocumentWorker().catch(() => {});
+process.on("SIGTERM", () => {
   process.exit(0);
 });
 

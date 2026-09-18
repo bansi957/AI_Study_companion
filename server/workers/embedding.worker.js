@@ -150,7 +150,7 @@ const startEmbeddingWorker = () => {
   try {
     embeddingWorker = new Worker(EMBEDDING_QUEUE_NAME, processEmbedding, {
       connection: redisConfig.connection,
-      concurrency: 2,
+      concurrency: 1,
     });
 
     embeddingWorker.on("completed", (job) => {

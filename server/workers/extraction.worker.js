@@ -172,7 +172,7 @@ const startExtractionWorker = () => {
   try {
     extractionWorker = new Worker(EXTRACTION_QUEUE_NAME, processExtraction, {
       connection: redisConfig.connection,
-      concurrency: 2,
+      concurrency: 1,
     });
 
     extractionWorker.on("completed", (job) => {
