@@ -179,6 +179,8 @@ const updateProject = async (req, res, next) => {
   }
 };
 
+const { cascadeDeleteProjects } = require("../utils/cascadeDelete");
+
 const deleteProject = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -187,7 +189,7 @@ const deleteProject = async (req, res, next) => {
       return apiResponse(res, 400, "Invalid project ID");
     }
 
-    const project = await Project.findOneAndDelete({
+    const project = await Project.findOne({
       _id: id,
       userId: req.user.userId,
     });
@@ -196,35 +198,9 @@ const deleteProject = async (req, res, next) => {
       return apiResponse(res, 404, "Project not found");
     }
 
-    // Cascade delete materials, concepts, chunks, and extractedContent belonging to this project
-    const projObjectId = mongoose.Types.ObjectId.isValid(id)
-      ? new mongoose.Types.ObjectId(id)
-      : id;
-
-    // Purge all associated PDFs from Cloudinary first
-    try {
-      const materials = await Material.find({
-        $or: [{ projectId: id }, { projectId: projObjectId }],
-      });
-      await Promise.allSettled(
-        materials.map((mat) =>
-          deleteCloudinaryAsset(
-            mat.cloudinaryPublicId,
-            mat.fileUrl,
-            mat.cloudinaryResourceType || "raw"
-          )
-        )
-      );
-    } catch (cloudErr) {
-      console.warn(`[ProjectController] Cloudinary cleanup warning: ${cloudErr.message}`);
-    }
-
-    await Promise.all([
-      Material.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),
-      Concept.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),
-      ExtractedContent.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),
-      Chunk.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),
-    ]);
+    // Cascade delete project and all associated sub-resources:
+    // conversations, chats/messages, quizzes, attempts, mastery, materials (Cloudinary/local), chunks, concepts, etc.
+    await cascadeDeleteProjects([project._id]);
 
     return apiResponse(res, 200, "Project deleted successfully");
   } catch (error) {

@@ -125,6 +125,8 @@ const updateSpace = async (req, res, next) => {
   }
 };
 
+const { cascadeDeleteSpace } = require("../utils/cascadeDelete");
+
 const deleteSpace = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -133,12 +135,10 @@ const deleteSpace = async (req, res, next) => {
       return apiResponse(res, 400, "Invalid space ID");
     }
 
-    const space = await Space.findOneAndDelete({
-      _id: id,
-      userId: req.user.userId,
-    });
+    // Cascade delete space, all its projects, and all associated conversations, chats, quizzes, materials, chunks, etc.
+    const result = await cascadeDeleteSpace(id, req.user.userId);
 
-    if (!space) {
+    if (!result) {
       return apiResponse(res, 404, "Space not found");
     }
 
