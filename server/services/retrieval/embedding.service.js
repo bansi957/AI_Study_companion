@@ -4,22 +4,104 @@ const Material = require("../../models/Material");
 const AIUsage = require("../../models/AIUsage");
 
 /**
+ * Global Embedding Rate Limiter
+ * Ensures only one Gemini embedding request is active at a time across the entire process.
+ * Enforces a small delay between consecutive requests to prevent RPM spikes.
+ */
+class GlobalEmbeddingRateLimiter {
+  constructor(minIntervalMs = 500) {
+    this.active = false;
+    this.queue = [];
+    this.minIntervalMs = minIntervalMs;
+    this.lastRequestFinishedAt = 0;
+  }
+
+  async execute(fn) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ fn, resolve, reject });
+      this.processNext();
+    });
+  }
+
+  async processNext() {
+    if (this.active || this.queue.length === 0) return;
+    this.active = true;
+
+    const item = this.queue.shift();
+
+    try {
+      const now = Date.now();
+      const elapsed = now - this.lastRequestFinishedAt;
+      if (elapsed < this.minIntervalMs) {
+        await new Promise((r) => setTimeout(r, this.minIntervalMs - elapsed));
+      }
+      const result = await item.fn();
+      this.lastRequestFinishedAt = Date.now();
+      item.resolve(result);
+    } catch (err) {
+      this.lastRequestFinishedAt = Date.now();
+      item.reject(err);
+    } finally {
+      this.active = false;
+      this.processNext();
+    }
+  }
+}
+
+/**
+ * Detect whether an error corresponds to Gemini quota exhaustion / HTTP 429
+ * vs a brief network glitch or standard transient error.
+ */
+function isQuotaExceeded(err) {
+  if (!err) return false;
+
+  const status =
+    err.status ||
+    err.statusCode ||
+    (err.response && err.response.status) ||
+    (err.cause && err.cause.status);
+
+  const rawMessage = (err.message || "").toLowerCase();
+  const rawDetails = err.errorDetails || err.statusDetails || "";
+  const detailsStr =
+    typeof rawDetails === "string"
+      ? rawDetails.toLowerCase()
+      : JSON.stringify(rawDetails || "").toLowerCase();
+  const combined = `${rawMessage} ${detailsStr}`;
+
+  if (status === 429 || combined.includes("429") || combined.includes("resource_exhausted")) {
+    return true;
+  }
+
+  if (
+    combined.includes("quota") ||
+    combined.includes("rate_limit") ||
+    combined.includes("limit per minute") ||
+    combined.includes("requests per minute") ||
+    combined.includes("free_tier") ||
+    combined.includes("exceeded your current quota")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Dedicated Embedding Service using Google Gemini Embedding API
  *
  * Model: gemini-embedding-001
  * Dimension: 1536
  * Provider: gemini (@google/genai SDK)
- *
- * Fully replaces local ONNX Transformers.js model to ensure low memory
- * consumption on cloud hosting environments such as Render.
  */
 class EmbeddingService {
   constructor() {
     this.defaultModel = "gemini-embedding-001";
     this.defaultProvider = "gemini";
-    this.defaultBatchSize = 32;
+    this.defaultBatchSize = 8;
     this.defaultDimension = 1536;
     this.client = null;
+    this.rateLimiter = new GlobalEmbeddingRateLimiter(500);
   }
 
   getProvider() {
@@ -88,7 +170,8 @@ class EmbeddingService {
   }
 
   /**
-   * Execute API call with exponential backoff retry for transient and 429 errors.
+   * Execute API call with quota detection and backoff for transient errors.
+   * On HTTP 429 quota exhaustion: does NOT immediately retry 3 times.
    *
    * @param {Function} operation
    * @returns {Promise<any>}
@@ -101,18 +184,27 @@ class EmbeddingService {
       try {
         return await operation();
       } catch (err) {
+        // 1. Quota exceeded (HTTP 429 / RESOURCE_EXHAUSTED):
+        // Do not immediately retry quota-exceeded 3 times!
+        if (isQuotaExceeded(err)) {
+          console.warn("[GeminiEmbedding] quota exhausted - delaying job");
+          const safeMsg = this.sanitizeError(err);
+          const quotaErr = new Error(`[GeminiEmbedding] Quota exhausted: ${safeMsg}`);
+          quotaErr.status = 429;
+          quotaErr.isQuotaExceeded = true;
+          quotaErr.code = "QUOTA_EXHAUSTED";
+          quotaErr.originalError = safeMsg;
+          throw quotaErr;
+        }
+
         const status =
           err.status ||
           err.statusCode ||
           (err.response && err.response.status) ||
           (err.cause && err.cause.status);
 
-        const isRateLimit =
-          status === 429 ||
-          (err.message && (err.message.includes("429") || err.message.includes("RESOURCE_EXHAUSTED")));
-
+        // 2. Transient network/server errors (500, 502, 503, 504, connection reset)
         const isTransient =
-          isRateLimit ||
           status === 500 ||
           status === 502 ||
           status === 503 ||
@@ -121,7 +213,6 @@ class EmbeddingService {
           err.code === "ETIMEDOUT" ||
           err.name === "FetchError";
 
-        // Do not retry permanently failing client errors (400, 401, 403, 404) or beyond maxRetries
         if (!isTransient || attempt > maxRetries) {
           const safeMsg = this.sanitizeError(err);
           console.error(`[GeminiEmbedding] Error: ${safeMsg}`);
@@ -134,7 +225,7 @@ class EmbeddingService {
         const jitter = Math.floor(Math.random() * 300);
         const waitTime = delay + jitter;
         console.warn(
-          `[GeminiEmbedding] Rate limit / transient error (${status || err.code || "network"}). Retrying attempt ${attempt}/${maxRetries} in ${waitTime}ms...`
+          `[GeminiEmbedding] Temporary transient network error (${status || err.code || "network"}). Retrying attempt ${attempt}/${maxRetries} in ${waitTime}ms...`
         );
         await new Promise((resolve) => setTimeout(resolve, waitTime));
         delay *= 2;
@@ -202,21 +293,23 @@ class EmbeddingService {
     );
 
     console.log(
-      `[GeminiEmbedding] Request started: ${sanitizedTexts.length} item(s) (taskType: ${taskType}, outputDimension: ${dimension}, model: ${model})`
+      `[GeminiEmbedding] batch size: ${sanitizedTexts.length} item(s) (taskType: ${taskType}, outputDimension: ${dimension}, model: ${model})`
     );
 
     const ai = this.getClient();
 
     try {
-      const response = await this.executeWithRetry(async () => {
-        return await ai.models.embedContent({
-          model,
-          contents: sanitizedTexts,
-          config: {
-            taskType,
-            outputDimensionality: dimension,
-            ...(options.title ? { title: options.title } : {}),
-          },
+      const response = await this.rateLimiter.execute(async () => {
+        return await this.executeWithRetry(async () => {
+          return await ai.models.embedContent({
+            model,
+            contents: sanitizedTexts,
+            config: {
+              taskType,
+              outputDimensionality: dimension,
+              ...(options.title ? { title: options.title } : {}),
+            },
+          });
         });
       });
 
@@ -243,7 +336,7 @@ class EmbeddingService {
 
       const latency = Date.now() - startTime;
       console.log(
-        `[GeminiEmbedding] Batch completed: ${vectors.length} vector(s) generated in ${latency}ms (dimension: ${vectors[0]?.length || dimension})`
+        `[GeminiEmbedding] success: ${vectors.length} vector(s) generated in ${latency}ms (dimension: ${vectors[0]?.length || dimension})`
       );
 
       return {
@@ -265,6 +358,7 @@ class EmbeddingService {
   /**
    * Generate and persist embeddings for chunks of a material.
    * Automatically re-embeds legacy chunks whose dimension does not match 1536 or whose model differs.
+   * Persists each batch immediately upon success.
    *
    * @param {string|ObjectId} materialId
    * @param {Object} context - { userId, projectId, materialId }
@@ -329,11 +423,15 @@ class EmbeddingService {
     let totalEmbedded = 0;
     let batchesCount = 0;
 
-    // 3. Process chunks in bounded batches
+    // 3. Process chunks in bounded batches (default 8 chunks per batch)
     for (let i = 0; i < chunksToEmbed.length; i += batchSize) {
       batchesCount++;
       const chunkBatch = chunksToEmbed.slice(i, i + batchSize);
       const batchTexts = chunkBatch.map((c) => c.text);
+
+      console.log(
+        `[GeminiEmbedding] batch size: ${batchTexts.length} chunks (${i + 1}-${Math.min(i + batchSize, chunksToEmbed.length)} of ${chunksToEmbed.length})`
+      );
 
       let embedResult;
       try {
@@ -357,23 +455,12 @@ class EmbeddingService {
             errorMessage: err.message,
           });
         }
+        // When a batch fails because of quota exhaustion, leave remaining chunks unembedded
+        // so the next retry can continue seamlessly
         throw err;
       }
 
-      // Record successful AIUsage
-      if (userId && projectId) {
-        await this.recordUsage({
-          userId,
-          projectId,
-          model: embedResult.model,
-          latency: embedResult.latency,
-          inputTokens: embedResult.inputTokens,
-          success: true,
-          errorMessage: null,
-        });
-      }
-
-      // 4. Persist 1536-dimensional embeddings back to MongoDB Chunk documents
+      // 4. Persist 1536-dimensional embeddings back to MongoDB Chunk documents IMMEDIATELY
       const bulkOps = chunkBatch.map((chunk, idx) => ({
         updateOne: {
           filter: { _id: chunk._id },
@@ -390,6 +477,23 @@ class EmbeddingService {
 
       await Chunk.bulkWrite(bulkOps);
       totalEmbedded += chunkBatch.length;
+
+      console.log(
+        `[GeminiEmbedding] success: batch of ${chunkBatch.length} chunks persisted to database (${totalEmbedded}/${chunksToEmbed.length} total embedded)`
+      );
+
+      // Record successful AIUsage
+      if (userId && projectId) {
+        await this.recordUsage({
+          userId,
+          projectId,
+          model: embedResult.model,
+          latency: embedResult.latency,
+          inputTokens: embedResult.inputTokens,
+          success: true,
+          errorMessage: null,
+        });
+      }
     }
 
     return {

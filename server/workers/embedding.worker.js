@@ -1,4 +1,4 @@
-const { Worker } = require("bullmq");
+const { Worker, DelayedError } = require("bullmq");
 const redisConfig = require("../config/redis");
 const Material = require("../models/Material");
 const Project = require("../models/Project");
@@ -18,13 +18,67 @@ const sanitizeErrorMessage = (error) => {
 };
 
 /**
+ * Extract retry/reset delay from error if provided by Google Gemini API,
+ * otherwise default to a safe delay such as 10–15 minutes (default: 10 minutes = 600,000ms).
+ *
+ * @param {Error|Object} error
+ * @returns {number} delay in milliseconds
+ */
+const extractQuotaRetryDelayMs = (error) => {
+  const DEFAULT_DELAY_MS = 10 * 60 * 1000; // 10 minutes safe delay
+
+  if (!error) return DEFAULT_DELAY_MS;
+
+  // 1. Check HTTP response retry-after header (in seconds)
+  const retryAfterHeader =
+    error.response?.headers?.get?.("retry-after") ||
+    error.response?.headers?.["retry-after"] ||
+    error.headers?.["retry-after"];
+
+  if (retryAfterHeader) {
+    const seconds = parseFloat(retryAfterHeader);
+    if (!isNaN(seconds) && seconds > 0) {
+      return Math.max(60000, Math.ceil(seconds * 1000) + 5000);
+    }
+  }
+
+  // 2. Parse compound pattern like "12m31.24s" or "17m40.99s" from error message/details
+  const rawText = `${error.message || ""} ${error.originalError || ""} ${JSON.stringify(error.errorDetails || "")}`;
+  const compoundMatch = rawText.match(/(?:try again in|retry in|wait)\s+(\d+)m([\d\.]+)s/i);
+  if (compoundMatch) {
+    const mins = parseInt(compoundMatch[1], 10) || 0;
+    const secs = parseFloat(compoundMatch[2]) || 0;
+    const totalMs = (mins * 60 + secs) * 1000;
+    if (totalMs > 0) {
+      return Math.max(60000, Math.ceil(totalMs) + 5000);
+    }
+  }
+
+  // 3. Parse simple pattern like "Please try again in 15m" or "try again in 60s"
+  const simpleMatch = rawText.match(/(?:try again in|retry after|retry in)\s+([0-9\.]+)\s*(s|m|h|min|sec|minutes?|seconds?)/i);
+  if (simpleMatch) {
+    const val = parseFloat(simpleMatch[1]);
+    const unit = simpleMatch[2].toLowerCase();
+    if (!isNaN(val) && val > 0) {
+      let ms = val * 1000;
+      if (unit.startsWith("m")) ms = val * 60 * 1000;
+      if (unit.startsWith("h")) ms = val * 3600 * 1000;
+      return Math.max(60000, Math.ceil(ms) + 5000);
+    }
+  }
+
+  return DEFAULT_DELAY_MS;
+};
+
+/**
  * Process embedding generation for a material's semantic chunks.
  * On completion, marks the document as retrieval-ready (status: READY).
  *
  * @param {Object} job - BullMQ Job instance
+ * @param {string} [token] - BullMQ lock token
  * @returns {Promise<Object>}
  */
-const processEmbedding = async (job) => {
+const processEmbedding = async (job, token) => {
   const { materialId, projectId, userId } = job.data || {};
 
   if (!materialId || !projectId) {
@@ -117,26 +171,79 @@ const processEmbedding = async (job) => {
       dimension: embeddingResult.dimension,
     };
   } catch (error) {
+    const isQuota = Boolean(error?.isQuotaExceeded === true || error?.code === "QUOTA_EXHAUSTED" || error?.status === 429);
     const safeError = sanitizeErrorMessage(error);
-    const existing = await Material.findById(material._id);
-    if (existing) {
-      existing.status = "FAILED";
-      existing.processingError = safeError;
-      existing.metadata = {
-        ...(existing.metadata || {}),
-        retrievalStatus: "FAILED",
-        retrievalError: safeError,
-      };
-      await existing.save();
 
-      emitMaterialUpdate({
-        projectId: project._id,
-        materialId: material._id,
-        status: "FAILED",
-        error: safeError,
-        stage: "Embedding generation failed",
-        originalName: material.originalName,
-      });
+    // 1. Handle Gemini HTTP 429 Quota Exceeded with delayed requeue
+    // Does NOT consume BullMQ retry attempts (preserves job)
+    if (isQuota) {
+      const delayMs = extractQuotaRetryDelayMs(error);
+      const delayMinutes = Math.round(delayMs / 60000);
+
+      console.warn(
+        `[Worker:${EMBEDDING_QUEUE_NAME}] Gemini quota exhausted; delaying job (${delayMinutes}m / ${Math.round(delayMs / 1000)}s)`
+      );
+
+      // Keep material in PROCESSING status so UI shows it waiting for quota reset
+      const existing = await Material.findById(material._id);
+      if (existing && existing.status !== "READY") {
+        existing.status = "PROCESSING";
+        existing.processingError = null;
+        existing.metadata = {
+          ...(existing.metadata || {}),
+          retrievalStatus: "WAITING_FOR_QUOTA",
+          retrievalError: safeError,
+          quotaResumeAt: new Date(Date.now() + delayMs),
+        };
+        await existing.save();
+
+        emitMaterialUpdate({
+          projectId: project._id,
+          materialId: material._id,
+          status: "PROCESSING",
+          stage: `Embedding paused: API quota exhausted. Resuming in ~${delayMinutes} min...`,
+          originalName: material.originalName,
+        });
+      }
+
+      // Delay the job in BullMQ without consuming retry attempts
+      const lockToken = token || job.token;
+      if (typeof job.moveToDelayed === "function") {
+        await job.moveToDelayed(Date.now() + delayMs, lockToken);
+        throw new DelayedError();
+      }
+    }
+
+    // 2. For ordinary transient errors, preserve standard BullMQ retry behavior
+    const attemptsMade = job.attemptsMade || 0;
+    const maxAttempts = job.opts?.attempts || 3;
+    const isFinalAttempt = attemptsMade + 1 >= maxAttempts;
+
+    if (isFinalAttempt) {
+      const existing = await Material.findById(material._id);
+      if (existing) {
+        existing.status = "FAILED";
+        existing.processingError = safeError;
+        existing.metadata = {
+          ...(existing.metadata || {}),
+          retrievalStatus: "FAILED",
+          retrievalError: safeError,
+        };
+        await existing.save();
+
+        emitMaterialUpdate({
+          projectId: project._id,
+          materialId: material._id,
+          status: "FAILED",
+          error: safeError,
+          stage: "Embedding generation failed",
+          originalName: material.originalName,
+        });
+      }
+    } else {
+      console.warn(
+        `[Worker:${EMBEDDING_QUEUE_NAME}] Job ${job?.id} attempt ${attemptsMade + 1}/${maxAttempts} failed: ${safeError}. BullMQ will retry.`
+      );
     }
     throw error;
   }
@@ -161,6 +268,9 @@ const startEmbeddingWorker = () => {
     });
 
     embeddingWorker.on("failed", (job, err) => {
+      if (err?.name === "DelayedError" || err?.message === "bullmq:movedToDelayed") {
+        return; // Handled quota delay, not a permanent job failure
+      }
       console.error(
         `[Worker:${EMBEDDING_QUEUE_NAME}] Job ${job?.id} failed (attempt ${job?.attemptsMade}/${job?.opts?.attempts}): ${sanitizeErrorMessage(err)}`
       );
