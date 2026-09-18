@@ -22,6 +22,7 @@ import {
   BookOpen,
   Calendar,
   DollarSign,
+  Eye,
 } from "lucide-react";
 import {
   useGetAdminDashboardQuery,
@@ -33,6 +34,7 @@ import {
 import { Card } from "../../components/ui/Card";
 import { Badge } from "../../components/ui/Badge";
 import { Avatar } from "../../components/ui/Avatar";
+import { UserDetailsModal } from "./components/UserDetailsModal";
 
 /* ─────────────────────── Helpers ─────────────────────── */
 const formatTimeAgo = (timestamp) => {
@@ -388,6 +390,7 @@ export const AdminDashboardPage = () => {
   const [aiTimeframe, setAiTimeframe] = useState("7d");
   const [selectedModelFilter, setSelectedModelFilter] = useState("all");
   const [historyModelFilter, setHistoryModelFilter] = useState("all");
+  const [inspectingUserId, setInspectingUserId] = useState(null);
 
   const { data: dashboardData, isLoading: isDashboardLoading, refetch: refetchDashboard } = useGetAdminDashboardQuery();
   const { data: usersData, isLoading: isUsersLoading, refetch: refetchUsers } = useGetAdminUsersQuery(
@@ -831,21 +834,26 @@ export const AdminDashboardPage = () => {
                       <th className="py-3 px-4">Role</th>
                       <th className="py-3 px-4">Projects</th>
                       <th className="py-3 px-4">Joined</th>
+                      <th className="py-3 px-4 text-right">Details</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 text-sm">
                     {isUsersLoading ? (
-                      <tr><td colSpan={4} className="py-8 text-center text-slate-500 text-xs animate-pulse">Loading users...</td></tr>
+                      <tr><td colSpan={5} className="py-8 text-center text-slate-500 text-xs animate-pulse">Loading users...</td></tr>
                     ) : (usersData?.users || []).length === 0 ? (
-                      <tr><td colSpan={4} className="py-8 text-center text-slate-500 text-xs italic">No users found.</td></tr>
+                      <tr><td colSpan={5} className="py-8 text-center text-slate-500 text-xs italic">No users found.</td></tr>
                     ) : (
                       (usersData?.users || []).map((u) => (
-                        <tr key={u._id} className="hover:bg-slate-800/30 transition-colors">
+                        <tr
+                          key={u._id}
+                          className="hover:bg-slate-800/30 transition-colors group cursor-pointer"
+                          onClick={() => setInspectingUserId(u._id)}
+                        >
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-3">
                               <Avatar name={u.name} size="sm" />
                               <div>
-                                <p className="font-semibold text-slate-100 text-sm">{u.name}</p>
+                                <p className="font-semibold text-slate-100 text-sm group-hover:text-indigo-300 transition-colors">{u.name}</p>
                                 <p className="text-xs text-slate-400">{u.email}</p>
                               </div>
                             </div>
@@ -854,8 +862,18 @@ export const AdminDashboardPage = () => {
                             <Badge variant={u.role === "admin" ? "primary" : "subtle"}>{u.role || "user"}</Badge>
                           </td>
                           <td className="py-3 px-4 text-slate-300 font-medium">{u.projectsCount ?? 0}</td>
-                          <td className="py-3 px-4 text-slate-400 text-xs">
+                          <td className="py-3 px-4 text-slate-400 text-xs font-mono">
                             {new Date(u.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </td>
+                          <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => setInspectingUserId(u._id)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/15 hover:bg-indigo-600/30 text-indigo-300 hover:text-white border border-indigo-500/30 transition-all cursor-pointer shadow-sm hover:shadow-indigo-500/20"
+                              title="View spaces, projects, quiz attempts and activity"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Inspect</span>
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -1440,6 +1458,13 @@ export const AdminDashboardPage = () => {
           )}
         </div>
       )}
+
+      {/* ── User Inspection Modal ── */}
+      <UserDetailsModal
+        userId={inspectingUserId}
+        isOpen={Boolean(inspectingUserId)}
+        onClose={() => setInspectingUserId(null)}
+      />
     </div>
   );
 };

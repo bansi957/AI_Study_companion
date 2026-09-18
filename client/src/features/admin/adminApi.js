@@ -25,6 +25,15 @@ export const adminApi = createApi({
       providesTags: ["AdminUsers"],
     }),
 
+    getAdminUserDetails: builder.query({
+      query: (userId) => ({
+        url: `/admin/users/${userId}`,
+        method: "GET",
+      }),
+      transformResponse: (response) => response?.data ?? null,
+      providesTags: (result, error, userId) => [{ type: "AdminUsers", id: userId }],
+    }),
+
     getAdminActivities: builder.query({
       query: (params) => ({
         url: "/admin/activities",
@@ -67,6 +76,7 @@ export const adminApi = createApi({
 export const {
   useGetAdminDashboardQuery,
   useGetAdminUsersQuery,
+  useGetAdminUserDetailsQuery,
   useGetAdminActivitiesQuery,
   useGetAdminAIUsageQuery,
   useGetAdminHealthQuery,

@@ -5,6 +5,8 @@ const Project = require("../../models/Project");
 const Material = require("../../models/Material");
 const Activity = require("../../models/Activity");
 const AIUsage = require("../../models/AIUsage");
+const Quiz = require("../../models/Quiz");
+const QuizAttempt = require("../../models/QuizAttempt");
 const { documentQueue } = require("../../queues/document.queue");
 const { documentWorker } = require("../../workers/document.worker");
 const redisConfig = require("../../config/redis");
@@ -146,11 +148,23 @@ const getUserById = async (userId) => {
     return null;
   }
 
-  const [spacesCount, projectsCount, materialsCount, recentActivity, aiAgg] = await Promise.all([
-    Space.countDocuments({ userId }),
-    Project.countDocuments({ userId }),
-    Material.countDocuments({ userId }),
-    Activity.find({ userId }).sort({ createdAt: -1 }).limit(10).lean(),
+  const [
+    spaces,
+    projects,
+    quizAttempts,
+    recentActivity,
+    aiAgg,
+    materialsCount,
+  ] = await Promise.all([
+    Space.find({ userId }).sort({ createdAt: -1 }).lean(),
+    Project.find({ userId }).populate("spaceId", "name color icon").sort({ createdAt: -1 }).lean(),
+    QuizAttempt.find({ userId })
+      .populate("projectId", "name")
+      .populate("quizId", "difficulty questionFormat totalQuestions")
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean(),
+    Activity.find({ userId }).populate("projectId", "name").sort({ createdAt: -1 }).limit(25).lean(),
     AIUsage.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
       {
@@ -163,7 +177,42 @@ const getUserById = async (userId) => {
         },
       },
     ]),
+    Material.countDocuments({ userId }),
   ]);
+
+  // Attach materials count to each project
+  const projectsWithCounts = await Promise.all(
+    projects.map(async (p) => {
+      const matCount = await Material.countDocuments({ projectId: p._id });
+      return {
+        ...p,
+        materialsCount: matCount,
+      };
+    })
+  );
+
+  // Attach project count to each space
+  const spacesWithCounts = spaces.map((s) => {
+    const pCount = projects.filter((p) =>
+      p.spaceId && p.spaceId._id
+        ? p.spaceId._id.toString() === s._id.toString()
+        : p.spaceId?.toString() === s._id.toString()
+    ).length;
+    return {
+      ...s,
+      projectsCount: pCount,
+    };
+  });
+
+  // Calculate quiz statistics
+  const completedAttempts = quizAttempts.filter((q) => q.completed);
+  const averageScore =
+    completedAttempts.length > 0
+      ? Math.round(
+          completedAttempts.reduce((acc, q) => acc + (q.score || 0), 0) /
+            completedAttempts.length
+        )
+      : 0;
 
   const aiStats = aiAgg[0] || {
     totalRequests: 0,
@@ -175,15 +224,21 @@ const getUserById = async (userId) => {
   return {
     user,
     stats: {
-      spacesCount,
-      projectsCount,
+      spacesCount: spaces.length,
+      projectsCount: projects.length,
       materialsCount,
+      quizAttemptsCount: quizAttempts.length,
+      quizzesCompletedCount: completedAttempts.length,
+      averageQuizScore: averageScore,
       aiUsage: {
         totalRequests: aiStats.totalRequests,
         totalTokens: aiStats.totalInputTokens + aiStats.totalOutputTokens,
         totalCost: Number(aiStats.totalCost.toFixed(6)),
       },
     },
+    spaces: spacesWithCounts,
+    projects: projectsWithCounts,
+    quizAttempts,
     recentActivity,
   };
 };
