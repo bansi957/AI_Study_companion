@@ -1,13 +1,16 @@
 // Load environment variables FIRST — before any other module reads process.env
 require("dotenv").config();
+// Firebase Auth enabled
 
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 
 const loadEnv = require("./config/env");
 const env = loadEnv();
 const connectDB = require("./config/db");
+const { initSocket } = require("./config/socket");
 const errorMiddleware = require("./middleware/error.middleware");
 const { startDocumentWorker, closeDocumentWorker } = require("./workers/document.worker");
 
@@ -75,8 +78,11 @@ app.use(errorMiddleware);
 
 // Server
 const startServer = () => {
-  const server = app.listen(env.port, () => {
-    console.log(`Server running on port ${env.port}`);
+  const httpServer = http.createServer(app);
+  initSocket(httpServer);
+
+  const server = httpServer.listen(env.port, () => {
+    console.log(`Server running on port ${env.port} with Socket.io active`);
   });
 
   // Start background document processing worker

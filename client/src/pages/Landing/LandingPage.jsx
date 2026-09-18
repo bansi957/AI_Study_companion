@@ -31,13 +31,8 @@ export const LandingPage = () => {
 
           <div className="flex items-center gap-3">
             <Link to="/login">
-              <Button variant="ghost" size="sm">
-                Sign In
-              </Button>
-            </Link>
-            <Link to="/register">
               <Button variant="primary" size="sm">
-                Get Started
+                Continue with Google
               </Button>
             </Link>
           </div>
@@ -73,14 +68,9 @@ export const LandingPage = () => {
             </p>
 
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link to="/register" className="w-full sm:w-auto">
-                <Button variant="primary" size="lg" className="w-full sm:w-auto px-8" icon={ArrowRight}>
-                  Start Learning
-                </Button>
-              </Link>
               <Link to="/login" className="w-full sm:w-auto">
-                <Button variant="secondary" size="lg" className="w-full sm:w-auto">
-                  Explore Workspace
+                <Button variant="primary" size="lg" className="w-full sm:w-auto px-8" icon={ArrowRight}>
+                  Start with Google
                 </Button>
               </Link>
             </div>

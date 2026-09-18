@@ -1,12 +1,17 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, Plus, FolderPlus, FolderKanban } from "lucide-react";
+import { useSelector } from "react-redux";
+import { selectUser } from "../../features/auth/authSlice";
 import { Button } from "../ui/Button";
 
 export const TopNav = ({ onMenuClick }) => {
   const location = useLocation();
+  const user = useSelector(selectUser);
+  const isAdmin = user?.role === "admin";
 
   const getPageTitle = () => {
+    if (location.pathname === "/admin") return "Admin Dashboard";
     if (location.pathname === "/home") return "Dashboard";
     if (location.pathname === "/spaces") return "Learning Spaces";
     if (location.pathname.startsWith("/spaces/new")) return "New Space";
@@ -32,19 +37,21 @@ export const TopNav = ({ onMenuClick }) => {
         </h2>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-3">
-        <Link to="/spaces/new">
-          <Button variant="secondary" size="sm" icon={FolderPlus}>
-            <span className="hidden sm:inline">New Space</span>
-          </Button>
-        </Link>
-        <Link to="/projects/new">
-          <Button variant="primary" size="sm" icon={Plus}>
-            <span className="hidden sm:inline">New Project</span>
-            <span className="sm:hidden">Project</span>
-          </Button>
-        </Link>
-      </div>
+      {!isAdmin && (
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Link to="/spaces/new">
+            <Button variant="secondary" size="sm" icon={FolderPlus}>
+              <span className="hidden sm:inline">New Space</span>
+            </Button>
+          </Link>
+          <Link to="/projects/new">
+            <Button variant="primary" size="sm" icon={Plus}>
+              <span className="hidden sm:inline">New Project</span>
+              <span className="sm:hidden">Project</span>
+            </Button>
+          </Link>
+        </div>
+      )}
     </header>
   );
 };

@@ -36,12 +36,28 @@ class GrowthService {
       throw err;
     }
 
+    const knowledgeService = require("../documents/knowledge.service");
+
     // 2. Fetch concepts, current masteries, and historical snapshots
-    const [concepts, masteries, histories] = await Promise.all([
-      Concept.find({ projectId }).lean(),
+    let [concepts, masteries, histories] = await Promise.all([
+      knowledgeService.getConceptsByProject(projectId),
       Mastery.find({ userId, projectId }).lean(),
       MasteryHistory.find({ userId, projectId }).sort({ createdAt: 1 }).lean(),
     ]);
+
+    // On-demand concept generation if no concepts exist yet for this project
+    if (!concepts || concepts.length === 0) {
+      const generated = await knowledgeService.generateConceptsOnDemand({
+        projectId,
+        userId,
+      }).catch((err) => {
+        console.warn(`[GrowthService] On-demand concept generation note: ${err.message}`);
+        return [];
+      });
+      if (generated && generated.length > 0) {
+        concepts = generated;
+      }
+    }
 
     const masteryMap = new Map();
     for (const m of masteries) {
@@ -61,6 +77,7 @@ class GrowthService {
     const improving = [];
     const stable = [];
     const requiringAttention = [];
+    const unassessed = [];
     const recentTrends = [];
 
     let totalScoreSum = 0;
@@ -91,31 +108,41 @@ class GrowthService {
         previousScore,
         baselineScore,
         delta,
+        scoreChange: delta,
         confidence: mastery ? mastery.confidence : 0,
         lastEvidence: mastery ? mastery.lastEvidence : null,
         lastAssessedAt: mastery ? mastery.lastAssessedAt : null,
         historyCount: historyList.length,
+        isAssessed: !!mastery,
       };
 
       // Classification Logic:
+      // - Unassessed: no assessment/quiz history yet
+      // - Improving: currentScore >= 70 OR positive growth delta >= 5
+      // - Stable: currentScore between 50 and 69 with non-negative trajectory
       // - Requiring Attention: currentScore < 50 OR delta <= -5 (regression)
-      // - Improving: delta >= +5 (meaningful improvement)
-      // - Stable: currentScore >= 50 and delta between -4 and +4
-      if (currentScore < 50 || delta <= -5) {
-        item.status = "Requiring Attention";
-        item.reason =
-          currentScore < 50
-            ? "Mastery score below proficiency threshold (50%)"
-            : `Declining trend (${delta} pts from baseline)`;
-        requiringAttention.push(item);
-      } else if (delta >= 5) {
+      if (!mastery) {
+        item.status = "Unassessed";
+        item.reason = "Not assessed yet. Complete a quiz to evaluate.";
+        unassessed.push(item);
+      } else if (currentScore >= 70 || delta >= 5) {
         item.status = "Improving";
-        item.reason = `Positive growth of +${delta} pts from baseline`;
+        item.reason =
+          delta >= 5
+            ? `Positive growth of +${delta} pts from baseline`
+            : `High conceptual mastery (${currentScore}%)`;
         improving.push(item);
-      } else {
+      } else if (currentScore >= 50 && delta > -5) {
         item.status = "Stable";
         item.reason = "Consistent performance at proficiency level";
         stable.push(item);
+      } else {
+        item.status = "Requiring Attention";
+        item.reason =
+          currentScore < 50
+            ? `Mastery score (${currentScore}%) below proficiency threshold (50%)`
+            : `Declining trend (${delta} pts from baseline)`;
+        requiringAttention.push(item);
       }
 
       recentTrends.push({
@@ -144,10 +171,12 @@ class GrowthService {
         improvingCount: improving.length,
         stableCount: stable.length,
         requiringAttentionCount: requiringAttention.length,
+        unassessedCount: unassessed.length,
       },
       improving,
       stable,
       requiringAttention,
+      unassessed,
       recentTrends,
     };
   }

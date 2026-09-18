@@ -11,7 +11,12 @@ import {
   Trash2,
   BookOpen,
 } from "lucide-react";
-import { useGetProjectsQuery, useDeleteProjectMutation } from "../../features/projects/projectsApi";
+import { useSelector } from "react-redux";
+import { selectUser } from "../../features/auth/authSlice";
+import {
+  useGetProjectsQuery,
+  useDeleteProjectMutation,
+} from "../../features/projects/projectsApi";
 import { useGetSpacesQuery } from "../../features/spaces/spacesApi";
 import { PageHeader } from "../../components/common/PageHeader";
 import { Button } from "../../components/ui/Button";
@@ -26,6 +31,8 @@ import toast from "react-hot-toast";
 
 export const ProjectsPage = () => {
   const navigate = useNavigate();
+  const user = useSelector(selectUser);
+  const isAdmin = user?.role === "admin";
 
   const {
     data: projects = [],
@@ -34,10 +41,7 @@ export const ProjectsPage = () => {
     refetch: refetchProjects,
   } = useGetProjectsQuery();
 
-  const {
-    data: spaces = [],
-    isLoading: spacesLoading,
-  } = useGetSpacesQuery();
+  const { data: spaces = [], isLoading: spacesLoading } = useGetSpacesQuery();
 
   const [deleteProject, { isLoading: isDeleting }] = useDeleteProjectMutation();
 
@@ -81,7 +85,9 @@ export const ProjectsPage = () => {
       setProjectToDelete(null);
       // RTK Query auto-invalidates Projects LIST tag — no manual state update needed
     } catch (err) {
-      toast.error(err?.customMessage || err?.data?.message || "Failed to delete project");
+      toast.error(
+        err?.customMessage || err?.data?.message || "Failed to delete project",
+      );
     }
   };
 
@@ -91,11 +97,13 @@ export const ProjectsPage = () => {
         title="My Projects"
         description="Focused learning workspaces with customized goals and reference materials."
         action={
-          <Link to="/projects/new">
-            <Button variant="primary" size="md" icon={Plus}>
-              Create Project
-            </Button>
-          </Link>
+          !isAdmin ? (
+            <Link to="/projects/new">
+              <Button variant="primary" size="md" icon={Plus}>
+                Create Project
+              </Button>
+            </Link>
+          ) : null
         }
       />
 
@@ -147,9 +155,13 @@ export const ProjectsPage = () => {
         <EmptyState
           icon={FolderKanban}
           title="No projects created yet"
-          description="A Project is a dedicated learning track inside a Space. Create one to define goals and study materials."
-          actionLabel="Create Your First Project"
-          onAction={() => navigate("/projects/new")}
+          description={
+            isAdmin
+              ? "No projects have been created on the platform yet."
+              : "A Project is a dedicated learning track inside a Space. Create one to define goals and study materials."
+          }
+          actionLabel={!isAdmin ? "Create Your First Project" : undefined}
+          onAction={!isAdmin ? () => navigate("/projects/new") : undefined}
         />
       ) : filteredProjects.length === 0 ? (
         <EmptyState
@@ -180,9 +192,7 @@ export const ProjectsPage = () => {
                     </span>
                     <Badge
                       variant={
-                        project.status === "completed"
-                          ? "success"
-                          : "primary"
+                        project.status === "completed" ? "success" : "primary"
                       }
                       size="sm"
                     >
@@ -230,7 +240,7 @@ export const ProjectsPage = () => {
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                     <Link
-                      to={`/spaces/${project.spaceId}`}
+                      to={`/projects/${project._id}`}
                       className="font-medium text-indigo-400 group-hover:text-indigo-300 flex items-center gap-1"
                     >
                       Open

@@ -20,7 +20,19 @@ const userSchema = new mongoose.Schema(
 
     passwordHash: {
       type: String,
-      required: true,
+      required: false,
+    },
+
+    firebaseUid: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
+
+    avatarUrl: {
+      type: String,
+      default: null,
     },
 
     role: {

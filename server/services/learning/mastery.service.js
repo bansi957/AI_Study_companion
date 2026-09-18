@@ -174,7 +174,7 @@ class MasteryService {
    */
   async recordActivity({ userId, projectId, conceptId, previousScore, newScore, source }) {
     try {
-      const concept = await Concept.findById(conceptId).select("name").lean();
+      const concept = await Concept.findConceptById(conceptId);
       await Activity.create({
         userId,
         projectId,
@@ -215,11 +215,27 @@ class MasteryService {
       throw err;
     }
 
+    const knowledgeService = require("../documents/knowledge.service");
+
     // Fetch concepts and masteries
-    const [concepts, masteries] = await Promise.all([
-      Concept.find({ projectId }).lean(),
+    let [concepts, masteries] = await Promise.all([
+      knowledgeService.getConceptsByProject(projectId),
       Mastery.find({ userId, projectId }).lean(),
     ]);
+
+    // On-demand concept generation if no concepts exist yet for this project
+    if (!concepts || concepts.length === 0) {
+      const generated = await knowledgeService.generateConceptsOnDemand({
+        projectId,
+        userId,
+      }).catch((err) => {
+        console.warn(`[MasteryService] On-demand concept generation note: ${err.message}`);
+        return [];
+      });
+      if (generated && generated.length > 0) {
+        concepts = generated;
+      }
+    }
 
     const masteryMap = new Map();
     for (const m of masteries) {
@@ -261,7 +277,7 @@ class MasteryService {
       throw err;
     }
 
-    const concept = await Concept.findById(conceptId).lean();
+    const concept = await Concept.findConceptById(conceptId);
     if (!concept) {
       const err = new Error("Concept not found");
       err.statusCode = 404;

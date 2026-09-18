@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const { generateToken } = require("../utils/jwt");
 const apiResponse = require("../utils/apiResponse");
+const { verifyFirebaseIdToken } = require("../config/firebase");
 const {
   validateRegisterInput,
   validateLoginInput,
@@ -12,6 +13,7 @@ const formatUserResponse = (user) => ({
   name: user.name,
   email: user.email,
   role: user.role,
+  avatarUrl: user.avatarUrl || null,
 });
 
 const register = async (req, res, next) => {
@@ -80,6 +82,70 @@ const login = async (req, res, next) => {
   }
 };
 
+/**
+ * Verifies Firebase ID Token, locates or creates the MongoDB user, and returns an application JWT.
+ * Never trusts client-sent user details.
+ */
+const googleAuth = async (req, res, next) => {
+  try {
+    const { idToken } = req.body || {};
+    if (!idToken) {
+      return apiResponse(res, 400, "Firebase ID token is required");
+    }
+
+    let decoded;
+    try {
+      decoded = await verifyFirebaseIdToken(idToken);
+    } catch (err) {
+      return apiResponse(res, 401, `Invalid or expired Firebase ID token: ${err.message}`);
+    }
+
+    const { uid, email, name, picture } = decoded;
+    if (!email) {
+      return apiResponse(res, 400, "Google account does not provide an email address");
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // 1. Try finding by firebaseUid
+    let user = await User.findOne({ firebaseUid: uid });
+
+    // 2. If not found by firebaseUid, try finding by email (legacy account link)
+    if (!user) {
+      user = await User.findOne({ email: normalizedEmail });
+      if (user) {
+        user.firebaseUid = uid;
+        if (picture && !user.avatarUrl) {
+          user.avatarUrl = picture;
+        }
+        await user.save();
+      }
+    }
+
+    // 3. If still not found, create new MongoDB User
+    if (!user) {
+      const displayName = (name && name.trim()) || normalizedEmail.split("@")[0];
+      user = await User.create({
+        name: displayName,
+        email: normalizedEmail,
+        firebaseUid: uid,
+        avatarUrl: picture || null,
+        role: "user",
+      });
+    }
+
+    // Generate standard backend JWT with user's MongoDB _id
+    const token = generateToken({ userId: user._id.toString() });
+
+    return apiResponse(res, 200, "Google authentication successful", {
+      user: formatUserResponse(user),
+      token,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const getMe = async (req, res, next) => {
   try {
     const userId = req.user?.userId;
@@ -103,5 +169,6 @@ const getMe = async (req, res, next) => {
 module.exports = {
   register,
   login,
+  googleAuth,
   getMe,
 };

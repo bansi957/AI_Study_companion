@@ -26,6 +26,17 @@ const answerSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    evaluation: {
+      score: { type: Number, default: 0 },
+      understanding: { type: String, default: "" },
+      accuracy: { type: String, default: "" },
+      relevance: { type: String, default: "" },
+      keyConceptsCovered: { type: [String], default: [] },
+      missingConcepts: { type: [String], default: [] },
+      strengths: { type: [String], default: [] },
+      reasoning: { type: String, default: "" },
+    },
   },
   {
     _id: false,

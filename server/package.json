@@ -13,6 +13,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^6.3.6",
     "cloudinary": "^2.11.0",
@@ -20,12 +21,14 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "firebase-admin": "^14.4.0",
     "groq-sdk": "^1.6.0",
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.10.1",
     "multer": "^2.4.0",
     "pdf-parse": "^2.4.5",
+    "socket.io": "^4.8.3",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {

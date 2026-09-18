@@ -2,19 +2,18 @@ import React from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   Compass,
-  FolderKanban,
   FolderClosed,
   GraduationCap,
-  Sparkles,
-  TrendingUp,
-  Lightbulb,
-  BarChart3,
   LogOut,
   X,
+  Plus,
+  ShieldCheck,
 } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { selectUser, clearCredentials } from "../../features/auth/authSlice";
+import { useGetSpacesQuery } from "../../features/spaces/spacesApi";
 import { Avatar } from "../ui/Avatar";
+import { firebaseSignOut } from "../../services/firebase";
 import toast from "react-hot-toast";
 
 export const Sidebar = ({ onClose }) => {
@@ -22,24 +21,30 @@ export const Sidebar = ({ onClose }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
+  const { data: spaces = [], isLoading: spacesLoading } = useGetSpacesQuery();
+
+  const handleLogout = async () => {
+    try {
+      await firebaseSignOut();
+    } catch (err) {
+      console.error("Firebase sign-out error:", err);
+    }
     dispatch(clearCredentials());
     toast.success("Logged out successfully");
     navigate("/login");
   };
 
-  const navItems = [
-    { label: "Home", path: "/home", icon: Compass },
-    { label: "Spaces", path: "/spaces", icon: FolderClosed },
-    { label: "Projects", path: "/projects", icon: FolderKanban },
-  ];
+  const isAdmin = user?.role === "admin";
 
-  const upcomingItems = [
-    { label: "AI Tutor", icon: Sparkles },
-    { label: "Growth", icon: TrendingUp },
-    { label: "Recommendations", icon: Lightbulb },
-    { label: "Analytics", icon: BarChart3 },
-  ];
+  const navItems = isAdmin
+    ? [
+        { label: "Dashboard", path: "/admin", icon: Compass },
+        { label: "Spaces", path: "/spaces", icon: FolderClosed },
+      ]
+    : [
+        { label: "Home", path: "/home", icon: Compass },
+        { label: "Spaces", path: "/spaces", icon: FolderClosed },
+      ];
 
   return (
     <aside className="w-64 h-full bg-slate-950 border-r border-slate-800/80 flex flex-col justify-between select-none">
@@ -53,7 +58,7 @@ export const Sidebar = ({ onClose }) => {
             </div>
             <div>
               <span className="text-sm font-bold tracking-tight text-white block leading-tight">
-                AI Companion
+                 AI Companion
               </span>
               <span className="text-[11px] text-slate-400 font-medium block">
                 Learning Workspace
@@ -98,29 +103,53 @@ export const Sidebar = ({ onClose }) => {
             })}
           </div>
 
-          {/* Upcoming capabilities */}
-          <div className="space-y-1 pt-2">
-            <p className="px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-              Coming Soon
-            </p>
-            {upcomingItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <div
-                  key={item.label}
-                  className="flex items-center justify-between px-3 py-2 rounded-xl text-sm text-slate-400 cursor-not-allowed opacity-75"
-                  title="Will be enabled in subsequent milestones"
+          {/* Created Spaces List */}
+          <div className="space-y-1 pt-1 border-t border-slate-800/60">
+            <div className="flex items-center justify-between px-3 pt-3 mb-2">
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Your Spaces
+              </p>
+              {!isAdmin && (
+                <NavLink
+                  to="/spaces/new"
+                  onClick={onClose}
+                  className="text-slate-400 hover:text-indigo-300 transition-colors p-1 rounded-md hover:bg-slate-900"
+                  title="Create new Space"
                 >
-                  <div className="flex items-center gap-3">
-                    <Icon className="w-4 h-4 text-slate-400" />
-                    <span>{item.label}</span>
-                  </div>
-                  <span className="text-[10px] font-semibold bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/50">
-                    Soon
-                  </span>
+                  <Plus className="w-3.5 h-3.5" />
+                </NavLink>
+              )}
+            </div>
+
+            <div className="space-y-0.5">
+              {spacesLoading ? (
+                <div className="px-3 py-2 text-xs text-slate-500 animate-pulse">
+                  Loading spaces...
                 </div>
-              );
-            })}
+              ) : spaces.length === 0 ? (
+                <p className="px-3 py-1.5 text-xs text-slate-500 italic">
+                  No spaces created yet
+                </p>
+              ) : (
+                spaces.map((space) => (
+                  <NavLink
+                    key={space._id}
+                    to={`/spaces/${space._id}`}
+                    onClick={onClose}
+                    className={({ isActive }) =>
+                      `flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-150 group ${
+                        isActive
+                          ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/25 font-semibold"
+                          : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/80 border border-transparent"
+                      }`
+                    }
+                  >
+                    <span className="text-sm flex-shrink-0">{space.icon || "📁"}</span>
+                    <span className="truncate flex-1">{space.name}</span>
+                  </NavLink>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>

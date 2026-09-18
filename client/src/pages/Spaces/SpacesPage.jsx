@@ -1,6 +1,8 @@
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FolderPlus, FolderClosed, Calendar, Layers, ArrowRight } from "lucide-react";
+import { useSelector } from "react-redux";
+import { selectUser } from "../../features/auth/authSlice";
 import { useGetSpacesQuery } from "../../features/spaces/spacesApi";
 import { useGetProjectsQuery } from "../../features/projects/projectsApi";
 import { PageHeader } from "../../components/common/PageHeader";
@@ -12,6 +14,8 @@ import { ErrorState } from "../../components/ui/ErrorState";
 
 export const SpacesPage = () => {
   const navigate = useNavigate();
+  const user = useSelector(selectUser);
+  const isAdmin = user?.role === "admin";
 
   const {
     data: spaces = [],
@@ -40,11 +44,13 @@ export const SpacesPage = () => {
         title="Learning Spaces"
         description="Organize your learning by broad areas such as skills, certifications, or professional goals."
         action={
-          <Link to="/spaces/new">
-            <Button variant="primary" size="md" icon={FolderPlus}>
-              Create Space
-            </Button>
-          </Link>
+          !isAdmin ? (
+            <Link to="/spaces/new">
+              <Button variant="primary" size="md" icon={FolderPlus}>
+                Create Space
+              </Button>
+            </Link>
+          ) : null
         }
       />
 
@@ -61,9 +67,13 @@ export const SpacesPage = () => {
         <EmptyState
           icon={FolderClosed}
           title="No Learning Spaces yet"
-          description="A Space represents a broad learning area (e.g. Machine Learning, Cloud Architecture). Create one to begin organizing your projects."
-          actionLabel="Create Your First Space"
-          onAction={() => navigate("/spaces/new")}
+          description={
+            isAdmin
+              ? "No spaces have been created on the platform yet."
+              : "A Space represents a broad learning area (e.g. Machine Learning, Cloud Architecture). Create one to begin organizing your projects."
+          }
+          actionLabel={!isAdmin ? "Create Your First Space" : undefined}
+          onAction={!isAdmin ? () => navigate("/spaces/new") : undefined}
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

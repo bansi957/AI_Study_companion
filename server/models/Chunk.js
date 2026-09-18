@@ -46,22 +46,22 @@ const chunkSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Primary / start page
+    // Primary exact citation page
     page: {
       type: Number,
-      default: null,
+      required: true,
     },
 
-    // All pages spanned by this chunk
+    // Only populated when chunk genuinely spans multiple pages
     pages: {
       type: [Number],
-      default: [],
+      default: undefined,
     },
 
-    // Detailed source provenance per page segment
+    // Detailed source provenance per page segment (only for multi-page chunks)
     sourceSegments: {
       type: [sourceSegmentSchema],
-      default: [],
+      default: undefined,
     },
 
     chunkIndex: {
@@ -69,7 +69,7 @@ const chunkSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Embedding vector (optional for Step 13, populated in future embedding stage)
+    // Embedding vector: 384-dimensional unit-normalized vector (onnx-community/all-MiniLM-L6-v2-ONNX)
     embedding: {
       type: [Number],
       required: false,

@@ -15,6 +15,15 @@ const messageSchema = new mongoose.Schema(
 
     sources: [
       {
+        id: {
+          type: String,
+        },
+        sourceId: {
+          type: String,
+        },
+        citationIndex: {
+          type: Number,
+        },
         materialId: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Material",
@@ -24,6 +33,15 @@ const messageSchema = new mongoose.Schema(
         },
         page: {
           type: Number,
+        },
+        fileUrl: {
+          type: String,
+        },
+        citation: {
+          type: String,
+        },
+        sourceExcerpt: {
+          type: String,
         },
         chunkId: {
           type: mongoose.Schema.Types.ObjectId,

@@ -19,7 +19,7 @@ const llmService = require("./llm.service");
  */
 class AssessmentService {
   constructor() {
-    this.primaryModel = process.env.LLM_PRIMARY_MODEL || "openai/gpt-oss-120b";
+    this.primaryModel = process.env.LLM_MODEL || process.env.LLM_PRIMARY_MODEL || "openai/gpt-oss-120b";
   }
 
   getGroqClient() {
@@ -58,15 +58,16 @@ class AssessmentService {
         err.statusCode = 400;
         throw err;
       }
-      targetConcept = await Concept.findOne({ _id: conceptId, projectId }).lean();
-      if (!targetConcept) {
+      targetConcept = await Concept.findConceptById(conceptId);
+      if (!targetConcept || String(targetConcept.projectId) !== String(projectId)) {
         const err = new Error("Concept not found in this project");
         err.statusCode = 404;
         throw err;
       }
     } else {
       // Auto-select: Fetch project concepts and find lowest mastery or highest importance
-      const concepts = await Concept.find({ projectId }).lean();
+      const knowledgeService = require("../documents/knowledge.service");
+      const concepts = await knowledgeService.getConceptsByProject(projectId);
       if (!concepts || concepts.length === 0) {
         const err = new Error("No concepts found for this project. Please extract concepts or add materials first.");
         err.statusCode = 400;
@@ -246,7 +247,7 @@ Return strictly a valid JSON object with the following schema:
     // 2. Fetch target Concept and Project
     const [project, concept] = await Promise.all([
       Project.findOne({ _id: assessment.projectId, userId }),
-      Concept.findById(assessment.conceptId).lean(),
+      Concept.findConceptById(assessment.conceptId),
     ]);
 
     if (!project) {

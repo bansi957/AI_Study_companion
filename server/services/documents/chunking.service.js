@@ -111,38 +111,44 @@ class ChunkingService {
     }
 
     const pages = Array.from(pageMap.keys()).sort((a, b) => a - b);
-    const sourceSegments = [];
-
-    for (const page of pages) {
-      const pageUnits = pageMap.get(page);
-      const combinedText = pageUnits.map((u) => u.text).join("\n\n");
-      const primaryType = pageUnits[0]?.type || "paragraph";
-
-      sourceSegments.push({
-        page,
-        text: combinedText,
-        segmentType: primaryType,
-      });
-    }
-
+    const isMultiPage = pages.length > 1;
     const fullText = currentUnits.map((u) => u.text).join("\n\n");
 
-    return {
+    const chunkObj = {
       userId,
       projectId,
       materialId,
       text: fullText,
-      page: pages[0] || null,
-      pages,
-      sourceSegments,
+      page: pages[0] || 1,
       chunkIndex,
-      embedding: null, // No embeddings in Step 13
+      embedding: null,
       metadata: {
         charCount: fullText.length,
         unitsCount: currentUnits.length,
-        isMultiPage: pages.length > 1,
+        isMultiPage,
       },
     };
+
+    // Only store pages and sourceSegments when a chunk genuinely spans multiple pages
+    if (isMultiPage) {
+      const sourceSegments = [];
+      for (const page of pages) {
+        const pageUnits = pageMap.get(page);
+        const combinedText = pageUnits.map((u) => u.text).join("\n\n");
+        const primaryType = pageUnits[0]?.type || "paragraph";
+
+        sourceSegments.push({
+          page,
+          text: combinedText,
+          segmentType: primaryType,
+        });
+      }
+
+      chunkObj.pages = pages;
+      chunkObj.sourceSegments = sourceSegments;
+    }
+
+    return chunkObj;
   }
 
   /**
@@ -259,14 +265,28 @@ class ChunkingService {
       throw new Error("Missing required context fields: materialId, projectId, userId");
     }
 
-    // 1. Fetch structured page segments in strict reading order
-    const segments = await ExtractedContent.find({
+    // 1. Fetch structured page-aware content from the single ExtractedContent document
+    const doc = await ExtractedContent.findOne({
       materialId,
       projectId,
       userId,
-    })
-      .sort({ pageNumber: 1, segmentIndex: 1 })
-      .lean();
+    }).lean();
+
+    const segments = [];
+    if (doc && Array.isArray(doc.pages)) {
+      for (const p of doc.pages) {
+        const pageNum = p.page || 1;
+        for (const b of p.blocks || []) {
+          const text = String(b.text || b.content || "").trim();
+          if (!text) continue;
+          segments.push({
+            pageNumber: pageNum,
+            type: b.type || "paragraph",
+            content: text,
+          });
+        }
+      }
+    }
 
     if (!segments || segments.length === 0) {
       return {
@@ -296,7 +316,7 @@ class ChunkingService {
     // Compute chunk statistics
     const totalChars = chunkObjects.reduce((acc, c) => acc + c.text.length, 0);
     const avgChunkSize = chunkObjects.length > 0 ? Math.round(totalChars / chunkObjects.length) : 0;
-    const multiPageCount = chunkObjects.filter((c) => c.pages.length > 1).length;
+    const multiPageCount = chunkObjects.filter((c) => (c.pages?.length || 0) > 1).length;
 
     return {
       status: "COMPLETED",

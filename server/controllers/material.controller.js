@@ -10,6 +10,7 @@ const apiResponse = require("../utils/apiResponse");
 const { addDocumentJob } = require("../queues/document.queue");
 const activityService = require("../services/analytics/activity.service");
 const { cloudinary, isCloudinaryConfigured } = require("../config/cloudinary");
+const { emitMaterialUpdate } = require("../config/socket");
 
 const uploadDir = path.join(__dirname, "../uploads");
 
@@ -119,11 +120,22 @@ const uploadMaterial = async (req, res, next) => {
       },
     });
 
-    // 6. Enqueue background document processing job
+    // Notify connected clients that material is queued
+    emitMaterialUpdate({
+      projectId: material.projectId.toString(),
+      materialId: material._id.toString(),
+      status: "QUEUED",
+      stage: "Queued for processing",
+      originalName: material.originalName,
+      pageCount: 0,
+    });
+
+    // 6. Enqueue background document extraction job
     try {
       await addDocumentJob({
         materialId: material._id.toString(),
         projectId: material.projectId.toString(),
+        userId: req.user.userId.toString(),
       });
     } catch (queueError) {
       console.warn(`[MaterialController] Failed to enqueue background job: ${queueError.message}`);
@@ -265,15 +277,23 @@ const deleteMaterial = async (req, res, next) => {
       return apiResponse(res, 404, "Material not found");
     }
 
-    // Delete material, extracted content, chunks, and unbind concepts
+    // Delete material, extracted content, chunks, and all concepts in the Concept model for this PDF
+    const matObjectId = mongoose.Types.ObjectId.isValid(id)
+      ? new mongoose.Types.ObjectId(id)
+      : id;
+
     await Material.findByIdAndDelete(id);
-    await ExtractedContent.deleteMany({ materialId: id });
-    await Chunk.deleteMany({ materialId: id });
-    await Concept.deleteMany({ sourceMaterialIds: [id] });
-    await Concept.updateMany(
-      { sourceMaterialIds: id },
-      { $pull: { sourceMaterialIds: id } }
-    );
+    await Promise.all([
+      ExtractedContent.deleteMany({
+        $or: [{ materialId: id }, { materialId: matObjectId }],
+      }),
+      Chunk.deleteMany({
+        $or: [{ materialId: id }, { materialId: matObjectId }],
+      }),
+      Concept.deleteMany({
+        $or: [{ materialId: id }, { materialId: matObjectId }],
+      }),
+    ]);
 
     // Delete from Cloudinary if stored in Cloudinary
     if (material.cloudinaryPublicId && isCloudinaryConfigured()) {
@@ -332,30 +352,43 @@ const getMaterialContent = async (req, res, next) => {
       return apiResponse(res, 404, "Project not found");
     }
 
-    // Build query with isolation filters
-    const query = {
+    const extractedDoc = await ExtractedContent.findOne({
       materialId: id,
       projectId: material.projectId,
       userId: req.user.userId,
-    };
+    }).lean();
 
+    let pages = extractedDoc?.pages || [];
     if (page) {
       const pageNum = parseInt(page, 10);
       if (!isNaN(pageNum) && pageNum > 0) {
-        query.pageNumber = pageNum;
+        pages = pages.filter((p) => p.page === pageNum);
       }
     }
 
-    const segments = await ExtractedContent.find(query)
-      .sort({ pageNumber: 1, segmentIndex: 1 })
-      .select("-__v");
+    // Build flattened segments array for backwards compatibility
+    const segments = [];
+    for (const p of pages) {
+      for (let i = 0; i < (p.blocks || []).length; i++) {
+        const b = p.blocks[i];
+        segments.push({
+          pageNumber: p.page,
+          segmentIndex: i,
+          type: b.type,
+          content: b.text,
+        });
+      }
+    }
 
     return apiResponse(res, 200, "Extracted content retrieved successfully", {
       materialId: id,
       projectId: material.projectId,
-      pageCount: material.pageCount,
+      pageCount: material.pageCount || extractedDoc?.totalPages || 0,
+      totalPages: extractedDoc?.totalPages || pages.length,
+      totalCharacters: extractedDoc?.totalCharacters || 0,
       totalSegments: segments.length,
-      structureStats: material.structureStats || {},
+      structureStats: extractedDoc?.stats || material.structureStats || {},
+      pages,
       segments,
     });
   } catch (error) {
@@ -384,12 +417,23 @@ const getMaterialConcepts = async (req, res, next) => {
       return apiResponse(res, 404, "Material not found");
     }
 
-    const concepts = await Concept.find({
-      projectId: material.projectId,
-      sourceMaterialIds: id,
-    })
-      .sort({ importance: -1, name: 1 })
-      .select("-__v");
+    const knowledgeService = require("../services/documents/knowledge.service");
+    let concepts = await knowledgeService.getConceptsByMaterial(id);
+
+    // On-demand concept generation when explicitly requested or if no concepts exist yet
+    if ((!concepts || concepts.length === 0) && req.query.generate !== "false") {
+      const generated = await knowledgeService.generateConceptsOnDemand({
+        projectId: material.projectId,
+        userId: req.user.userId,
+        materialId: id,
+      }).catch((err) => {
+        console.warn(`[MaterialController] On-demand concept generation note: ${err.message}`);
+        return [];
+      });
+      if (generated && generated.length > 0) {
+        concepts = generated;
+      }
+    }
 
     return apiResponse(res, 200, "Concepts retrieved successfully", {
       materialId: id,

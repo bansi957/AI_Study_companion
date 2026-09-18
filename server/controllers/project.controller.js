@@ -1,6 +1,10 @@
 const mongoose = require("mongoose");
 const Project = require("../models/Project");
 const Space = require("../models/Space");
+const Material = require("../models/Material");
+const Concept = require("../models/Concept");
+const ExtractedContent = require("../models/ExtractedContent");
+const Chunk = require("../models/Chunk");
 const apiResponse = require("../utils/apiResponse");
 const {
   validateCreateProject,
@@ -190,6 +194,18 @@ const deleteProject = async (req, res, next) => {
     if (!project) {
       return apiResponse(res, 404, "Project not found");
     }
+
+    // Cascade delete materials, concepts, chunks, and extractedContent belonging to this project
+    const projObjectId = mongoose.Types.ObjectId.isValid(id)
+      ? new mongoose.Types.ObjectId(id)
+      : id;
+
+    await Promise.all([
+      Material.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),
+      Concept.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),
+      ExtractedContent.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),
+      Chunk.deleteMany({ $or: [{ projectId: id }, { projectId: projObjectId }] }),
+    ]);
 
     return apiResponse(res, 200, "Project deleted successfully");
   } catch (error) {

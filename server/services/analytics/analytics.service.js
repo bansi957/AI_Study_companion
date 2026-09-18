@@ -11,6 +11,7 @@ const MasteryHistory = require("../../models/MasteryHistory");
 const Activity = require("../../models/Activity");
 const Recommendation = require("../../models/Recommendation");
 const growthService = require("../learning/growth.service");
+const knowledgeService = require("../documents/knowledge.service");
 
 /**
  * Analytics Service
@@ -119,7 +120,7 @@ class AnalyticsService {
       Quiz.countDocuments({ projectId: pId, userId: uId }),
       QuizAttempt.find({ projectId: pId, userId: uId, completed: true }).lean(),
       Assessment.find({ projectId: pId, userId: uId }).lean(),
-      Concept.find({ projectId: pId }).lean(),
+      knowledgeService.getConceptsByProject(pId),
       Mastery.find({ projectId: pId, userId: uId }).lean(),
       MasteryHistory.find({ projectId: pId, userId: uId }).sort({ createdAt: 1 }).lean(),
       Activity.find({ projectId: pId, userId: uId }).sort({ createdAt: -1 }).limit(50).lean(),

@@ -14,13 +14,14 @@ import { clearCredentials } from "../features/auth/authSlice";
 
 export const axiosBaseQuery =
   () =>
-  async ({ url, method, data, params }) => {
+  async ({ url, method, data, params, headers }) => {
     try {
       const result = await api({
         url,
         method,
         data,
         params,
+        headers,
       });
       return { data: result.data };
     } catch (axiosError) {

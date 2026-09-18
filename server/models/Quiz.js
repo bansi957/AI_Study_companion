@@ -4,8 +4,9 @@ const questionSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ["mcq", "open-ended"],
+      enum: ["mcq", "open-ended", "open_ended"],
       required: true,
+      default: "mcq",
     },
 
     question: {
@@ -26,7 +27,13 @@ const questionSchema = new mongoose.Schema(
     conceptId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Concept",
-      required: true,
+      required: false,
+      default: null,
+    },
+
+    topic: {
+      type: String,
+      default: null,
     },
 
     difficulty: {
@@ -38,6 +45,16 @@ const questionSchema = new mongoose.Schema(
     explanation: {
       type: String,
       default: "",
+    },
+
+    rubric: {
+      type: String,
+      default: "",
+    },
+
+    expectedKeyPoints: {
+      type: [String],
+      default: [],
     },
   },
   {
@@ -70,6 +87,17 @@ const quizSchema = new mongoose.Schema(
       type: String,
       enum: ["adaptive", "easy", "medium", "hard"],
       default: "adaptive",
+    },
+
+    questionFormat: {
+      type: String,
+      enum: ["mixed", "mcq", "open-ended"],
+      default: "mixed",
+    },
+
+    selectionReason: {
+      type: String,
+      default: "",
     },
 
     totalQuestions: {

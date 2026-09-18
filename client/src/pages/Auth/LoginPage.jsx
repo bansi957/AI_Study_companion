@@ -1,88 +1,148 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Mail, Lock, Eye, EyeOff, GraduationCap, ArrowRight, Sparkles } from "lucide-react";
+import { GraduationCap, Sparkles, AlertCircle, Loader2 } from "lucide-react";
 import { useDispatch } from "react-redux";
-import { useLoginMutation } from "../../features/auth/authApi";
+import { useGoogleLoginMutation } from "../../features/auth/authApi";
 import { setCredentials } from "../../features/auth/authSlice";
-import { Button } from "../../components/ui/Button";
-import { Input } from "../../components/ui/Input";
+import {
+  signInWithGooglePopup,
+  signInWithGoogleRedirect,
+  checkRedirectResult,
+  isFirebaseConfigured,
+} from "../../services/firebase";
 import toast from "react-hot-toast";
+
+// Crisp SVG for Google 'G' icon
+const GoogleIcon = ({ className = "w-5 h-5" }) => (
+  <svg className={className} viewBox="0 0 24 24">
+    <path
+      fill="#4285F4"
+      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+    />
+    <path
+      fill="#34A853"
+      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.24v3.15C3.26 21.36 7.33 24 12 24z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.24C.45 8.14 0 9.99 0 12s.45 3.86 1.24 5.42l4.04-3.15z"
+    />
+    <path
+      fill="#EA4335"
+      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.24 6.58l4.04 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+    />
+  </svg>
+);
 
 export const LoginPage = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
-  const [loginMutation, { isLoading }] = useLoginMutation();
+  const [googleLoginMutation, { isLoading: isBackendVerifying }] =
+    useGoogleLoginMutation();
 
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
-  });
-  const [errors, setErrors] = useState({});
-  const [showPassword, setShowPassword] = useState(false);
-  const [serverError, setServerError] = useState("");
+  const [isFirebaseLoading, setIsFirebaseLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
 
-  const from = location.state?.from?.pathname || "/home";
+  const isLoading = isFirebaseLoading || isBackendVerifying;
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    if (errors[name]) {
-      setErrors((prev) => ({ ...prev, [name]: "" }));
-    }
-    if (serverError) {
-      setServerError("");
-    }
-  };
+  // Handle redirect authentication result (if user was redirected on mobile/popup-blocked)
+  useEffect(() => {
+    const handleRedirect = async () => {
+      if (!isFirebaseConfigured) return;
+      try {
+        setIsFirebaseLoading(true);
+        const result = await checkRedirectResult();
+        if (result && result.user) {
+          await handleFirebaseUser(result.user);
+        }
+      } catch (err) {
+        console.error("Redirect auth error:", err);
+        setAuthError(err.message || "Failed to complete Google Sign-In redirect");
+      } finally {
+        setIsFirebaseLoading(false);
+      }
+    };
 
-  const validate = () => {
-    const newErrors = {};
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    handleRedirect();
+  }, []);
 
-    if (!formData.email.trim()) {
-      newErrors.email = "Email address is required";
-    } else if (!emailRegex.test(formData.email.trim())) {
-      newErrors.email = "Please enter a valid email address";
-    }
-
-    if (!formData.password) {
-      newErrors.password = "Password is required";
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setServerError("");
-
-    if (!validate()) return;
-
+  // Common exchange handler: Firebase User -> ID Token -> Backend Verify -> Redux Store
+  const handleFirebaseUser = async (firebaseUser) => {
+    setAuthError("");
     try {
-      const result = await loginMutation({
-        email: formData.email.trim(),
-        password: formData.password,
-      }).unwrap();
+      const idToken = await firebaseUser.getIdToken();
+      const response = await googleLoginMutation({ idToken }).unwrap();
 
-      const { user, token } = result.data ?? result;
+      const { user, token } = response.data ?? response;
       dispatch(setCredentials({ user, token }));
-      toast.success("Welcome back!");
-      navigate(from, { replace: true });
+      toast.success(`Welcome back, ${user.name || "Learner"}!`);
+
+      const defaultRoute = user.role === "admin" ? "/admin" : "/home";
+      const target = location.state?.from?.pathname || defaultRoute;
+      navigate(target, { replace: true });
     } catch (err) {
       const msg =
         err?.customMessage ||
         err?.data?.message ||
         err?.error ||
-        "Invalid email or password";
-      setServerError(msg);
+        "Backend token verification failed. Please try again.";
+      setAuthError(msg);
       toast.error(msg);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (!isFirebaseConfigured) {
+      setAuthError(
+        "Firebase environment variables are not configured. Please add VITE_FIREBASE_* credentials to client/.env"
+      );
+      toast.error("Firebase is not configured in client/.env");
+      return;
+    }
+
+    setAuthError("");
+    setIsFirebaseLoading(true);
+
+    try {
+      // 1. Attempt Popup authentication
+      const credential = await signInWithGooglePopup();
+      if (credential && credential.user) {
+        await handleFirebaseUser(credential.user);
+      }
+    } catch (err) {
+      console.warn("Popup authentication error:", err);
+      // If popup was blocked by browser or mobile environment, fallback to redirect
+      if (
+        err.code === "auth/popup-blocked" ||
+        err.code === "auth/popup-closed-by-user" &&
+          window.innerWidth < 768
+      ) {
+        try {
+          toast("Opening Google authentication...", { icon: "🔄" });
+          await signInWithGoogleRedirect();
+          return; // Browser will redirect
+        } catch (redirectErr) {
+          setAuthError(redirectErr.message);
+          toast.error(redirectErr.message);
+        }
+      } else if (err.code === "auth/cancelled-popup-request") {
+        // User closed or superseded popup, silent ignore
+      } else if (err.code === "auth/popup-closed-by-user") {
+        setAuthError("Google Sign-In was closed before completing. Please try again.");
+      } else {
+        const message = err.message || "Failed to sign in with Google.";
+        setAuthError(message);
+        toast.error(message);
+      }
+    } finally {
+      setIsFirebaseLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-[#0b0f19] flex">
-      {/* Left visual panel (desktop only) */}
+      {/* Left visual branding panel (desktop only) */}
       <div className="hidden lg:flex lg:w-1/2 bg-slate-950/60 border-r border-slate-800/80 p-12 flex-col justify-between relative overflow-hidden">
         {/* Glow ambient background effects */}
         <div className="absolute -top-20 -left-20 w-96 h-96 bg-indigo-600/10 blur-[100px] rounded-full pointer-events-none" />
@@ -107,23 +167,23 @@ export const LoginPage = () => {
         <div className="relative z-10 max-w-md">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-950/80 border border-indigo-700/40 text-indigo-300 text-xs font-medium mb-4">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Persistent Context & Mastery</span>
+            <span>Unified Google Authentication</span>
           </div>
           <h2 className="text-3xl font-extrabold text-white tracking-tight leading-tight mb-4">
-            Pick up right where your learning left off.
+            One click to resume your personalized study journey.
           </h2>
           <p className="text-sm text-slate-400 leading-relaxed">
-            Your spaces, projects, quiz progress, and AI tutor interactions are
-            persisted securely across all your devices.
+            Your spaces, concept roadmaps, quiz history, and AI tutor context are
+            safely linked to your Google identity across all devices.
           </p>
         </div>
 
         <div className="relative z-10 text-xs text-slate-500">
-          © {new Date().getFullYear()} AI Study Companion. Secure Authentication.
+          © {new Date().getFullYear()} AI Study Companion. Firebase Verified Security.
         </div>
       </div>
 
-      {/* Right form panel */}
+      {/* Right authentication panel */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8 animate-fade-in">
           {/* Mobile Header */}
@@ -139,97 +199,62 @@ export const LoginPage = () => {
           </div>
 
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">
-              Sign in to your workspace
+            <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+              Sign In to Your Workspace
             </h1>
-            <p className="text-sm text-slate-400 mt-1">
-              Enter your credentials to access your spaces and projects.
+            <p className="text-sm text-slate-400 mt-2">
+              Continue securely with your Google account to access your spaces and projects.
             </p>
           </div>
 
-          {serverError && (
-            <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300">
-              {serverError}
+          {/* Missing Env Configuration Warning */}
+          {!isFirebaseConfigured && (
+            <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-600/40 text-xs text-amber-300 space-y-1.5">
+              <div className="flex items-center gap-2 font-semibold text-amber-200">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-400" />
+                <span>Firebase Configuration Needed</span>
+              </div>
+              <p className="leading-relaxed text-slate-300">
+                Please configure your Firebase credentials in <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-mono">client/.env</code> to enable live Google Sign-In.
+              </p>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              label="Email Address"
-              type="email"
-              name="email"
-              placeholder="yamini@example.com"
-              icon={Mail}
-              value={formData.email}
-              onChange={handleChange}
-              error={errors.email}
-              autoComplete="email"
-              disabled={isLoading}
-            />
-
-            <div>
-              <Input
-                label="Password"
-                type={showPassword ? "text" : "password"}
-                name="password"
-                placeholder="Enter your password"
-                icon={Lock}
-                value={formData.password}
-                onChange={handleChange}
-                error={errors.password}
-                autoComplete="current-password"
-                disabled={isLoading}
-                rightElement={
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
-                }
-              />
-              <div className="flex justify-end mt-1.5">
-                <button
-                  type="button"
-                  onClick={() =>
-                    toast("Password reset is not yet configured on this system.", {
-                      icon: "ℹ️",
-                    })
-                  }
-                  className="text-xs text-slate-400 hover:text-slate-300 transition-colors"
-                >
-                  Forgot password?
-                </button>
-              </div>
+          {/* Error Banner */}
+          {authError && (
+            <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+              <div className="leading-relaxed">{authError}</div>
             </div>
+          )}
 
-            <Button
-              type="submit"
-              variant="primary"
-              size="md"
-              className="w-full mt-2"
-              isLoading={isLoading}
-              icon={ArrowRight}
+          {/* Single "Continue with Google" Button */}
+          <div className="pt-2">
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={isLoading}
+              className="w-full group relative flex items-center justify-center gap-3.5 py-3.5 px-6 rounded-2xl bg-white hover:bg-slate-100 text-slate-900 font-semibold text-sm shadow-lg shadow-black/20 hover:shadow-xl transition-all duration-200 active:scale-[0.99] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed border border-slate-200"
             >
-              Sign In
-            </Button>
-          </form>
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+                  <span>
+                    {isFirebaseLoading ? "Connecting with Google..." : "Verifying account..."}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <GoogleIcon className="w-5 h-5 flex-shrink-0" />
+                  <span>Continue with Google</span>
+                </>
+              )}
+            </button>
+          </div>
 
-          <div className="text-center pt-2">
-            <p className="text-sm text-slate-400">
-              Don't have an account?{" "}
-              <Link
-                to="/register"
-                className="font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
-              >
-                Create one
-              </Link>
+          <div className="pt-4 border-t border-slate-800/80 text-center">
+            <p className="text-xs text-slate-500 leading-relaxed">
+              By continuing, you agree to our Terms of Service and Privacy Policy.
+              Existing accounts with a matching Google email are automatically linked.
             </p>
           </div>
         </div>

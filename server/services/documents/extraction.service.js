@@ -40,6 +40,30 @@ class ExtractionService {
       throw new Error("Extraction requires userId, projectId, and materialId for isolation");
     }
 
+    // Check if extracted content already exists from a previous attempt of this job
+    const existingDoc = await ExtractedContent.findOne({
+      materialId,
+      projectId,
+    }).lean();
+
+    if (existingDoc && Array.isArray(existingDoc.pages) && existingDoc.pages.length > 0) {
+      const totalBlocks = existingDoc.pages.reduce(
+        (sum, p) => sum + (p.blocks ? p.blocks.length : 0),
+        0
+      );
+      return {
+        success: true,
+        materialId,
+        totalPages: existingDoc.totalPages || existingDoc.pages.length,
+        totalCharacters: existingDoc.totalCharacters || 0,
+        totalSegments: totalBlocks,
+        pages: existingDoc.pages,
+        stats: existingDoc.stats || material.structureStats || {},
+        ocrNeeded: false,
+        metadata: { reused: true },
+      };
+    }
+
     // Resolve PDF source: fetch buffer in memory from Cloudinary URL, or use local path fallback
     let pdfSource;
     if (material.fileUrl && (material.fileUrl.startsWith("http://") || material.fileUrl.startsWith("https://"))) {
@@ -61,7 +85,7 @@ class ExtractionService {
     const parsedPdf = await pdfService.parsePdf(pdfSource);
     const { totalPages, pages, tables, images, info } = parsedPdf;
 
-    const allSegments = [];
+    const structuredPages = [];
     const stats = {
       headings: 0,
       paragraphs: 0,
@@ -73,7 +97,6 @@ class ExtractionService {
     };
 
     let totalCharacters = 0;
-    let globalSegmentIndex = 0;
 
     // 2. Process page-by-page to guarantee exact page provenance
     for (const pageObj of pages) {
@@ -85,7 +108,7 @@ class ExtractionService {
       // 2a. Detect pages where normal text extraction returns little/no meaningful text
       if (ocrService.isScannedPage(pageText)) {
         try {
-          const pageImage = await pdfService.renderPageImage(filePath, pageNumber);
+          const pageImage = await pdfService.renderPageImage(pdfSource, pageNumber);
           if (pageImage && pageImage.data) {
             const ocrResult = await ocrService.ocrPage(pageImage.data, pageNumber);
             if (ocrResult && ocrResult.text) {
@@ -101,6 +124,7 @@ class ExtractionService {
       }
 
       totalCharacters += pageText.length;
+      const pageBlocks = [];
 
       // 2b. Check for parser-extracted figures/diagrams on this page (for native digital pages)
       if (!isOcr) {
@@ -108,23 +132,9 @@ class ExtractionService {
         if (pageImages && Array.isArray(pageImages.images)) {
           for (const img of pageImages.images) {
             const imgContent = `[Image: ${img.name || "embedded-image"} (${img.width || "?"}x${img.height || "?"})]`;
-            allSegments.push({
-              userId,
-              projectId,
-              materialId,
-              pageNumber,
-              segmentIndex: globalSegmentIndex++,
+            pageBlocks.push({
               type: "image/diagram",
-              content: imgContent,
-              metadata: {
-                page: pageNumber,
-                name: img.name || null,
-                width: img.width || null,
-                height: img.height || null,
-                kind: img.kind || null,
-                isOcr: false,
-                source: "native_image",
-              },
+              text: imgContent,
             });
             stats.images++;
           }
@@ -137,19 +147,9 @@ class ExtractionService {
         for (const tbl of pageTables.tables) {
           const tableContent = this.formatTableContent(tbl);
           if (tableContent) {
-            allSegments.push({
-              userId,
-              projectId,
-              materialId,
-              pageNumber,
-              segmentIndex: globalSegmentIndex++,
+            pageBlocks.push({
               type: "table",
-              content: tableContent,
-              metadata: {
-                page: pageNumber,
-                rowCount: tbl.rows ? tbl.rows.length : 0,
-                colCount: tbl.cols || 0,
-              },
+              text: tableContent,
             });
             stats.tables++;
           }
@@ -159,21 +159,12 @@ class ExtractionService {
       // 2d. Segment and classify text on this page (preserves provenance & structure)
       const textSegments = this.segmentPageText(pageText, pageNumber);
       for (const seg of textSegments) {
-        allSegments.push({
-          userId,
-          projectId,
-          materialId,
-          pageNumber,
-          segmentIndex: globalSegmentIndex++,
-          type: seg.type,
-          content: seg.content,
-          metadata: {
-            ...seg.metadata,
-            page: pageNumber,
-            isOcr,
-            ...(isOcr && ocrConfidence !== null ? { ocrConfidence } : {}),
-            source: isOcr ? "ocr" : "native_text",
-          },
+        const text = String(seg.content || "").trim();
+        if (!text) continue;
+
+        pageBlocks.push({
+          type: seg.type || "unknown",
+          text,
         });
 
         if (seg.type === "heading") stats.headings++;
@@ -183,21 +174,39 @@ class ExtractionService {
         else if (seg.type === "image/diagram") stats.images++;
         else stats.unknown++;
       }
+
+      structuredPages.push({
+        page: pageNumber,
+        blocks: pageBlocks,
+      });
     }
 
-    // 3. Persist extracted structured content to MongoDB in bulk
-    if (allSegments.length > 0) {
-      await ExtractedContent.insertMany(allSegments, { ordered: false });
-    }
+    // 3. Upsert exactly ONE ExtractedContent document for this material
+    const extractedDoc = await ExtractedContent.findOneAndUpdate(
+      { materialId },
+      {
+        materialId,
+        projectId,
+        userId,
+        pages: structuredPages,
+        totalPages: totalPages || structuredPages.length,
+        totalCharacters,
+        stats,
+        metadata: info || {},
+      },
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
+    );
 
     const ocrNeeded = totalPages > 0 && totalCharacters === 0;
 
     return {
       success: true,
-      totalPages,
-      totalCharacters,
-      totalSegments: allSegments.length,
-      stats,
+      materialId,
+      totalPages: extractedDoc.totalPages,
+      totalCharacters: extractedDoc.totalCharacters,
+      totalSegments: structuredPages.reduce((acc, p) => acc + p.blocks.length, 0),
+      pages: extractedDoc.pages,
+      stats: extractedDoc.stats,
       ocrNeeded,
       metadata: info || {},
     };
@@ -474,6 +483,101 @@ class ExtractionService {
         .join("\n");
     }
     return "";
+  }
+
+  /**
+   * Consolidate legacy fragmented ExtractedContent records into 1 document per material.
+   * Cleans up duplicate/fragmented records and ensures unique indexing.
+   */
+  async consolidateExtractedContent() {
+    const distinctMaterials = await ExtractedContent.distinct("materialId");
+    let consolidatedCount = 0;
+
+    for (const matId of distinctMaterials) {
+      const records = await ExtractedContent.find({ materialId: matId })
+        .sort({ pageNumber: 1, segmentIndex: 1, createdAt: 1 })
+        .lean();
+
+      if (!records || records.length === 0) continue;
+
+      // Check if already in the new format (1 doc with pages array)
+      if (records.length === 1 && Array.isArray(records[0].pages) && records[0].pages.length > 0) {
+        continue;
+      }
+
+      // Group blocks by page
+      const pageMap = new Map();
+      const stats = {
+        headings: 0,
+        paragraphs: 0,
+        lists: 0,
+        tables: 0,
+        images: 0,
+        unknown: 0,
+        ocrPages: 0,
+      };
+      let totalCharacters = 0;
+
+      for (const rec of records) {
+        if (Array.isArray(rec.pages)) {
+          for (const p of rec.pages) {
+            const pNum = p.page || 1;
+            if (!pageMap.has(pNum)) pageMap.set(pNum, []);
+            for (const b of p.blocks || []) {
+              const text = String(b.text || "").trim();
+              if (!text) continue;
+              pageMap.get(pNum).push({ type: b.type || "unknown", text });
+              totalCharacters += text.length;
+            }
+          }
+        } else {
+          const pNum = rec.pageNumber || 1;
+          const text = String(rec.content || rec.text || "").trim();
+          if (!text) continue;
+          if (!pageMap.has(pNum)) pageMap.set(pNum, []);
+          const type = rec.type || "unknown";
+          pageMap.get(pNum).push({ type, text });
+          totalCharacters += text.length;
+
+          if (type === "heading") stats.headings++;
+          else if (type === "paragraph") stats.paragraphs++;
+          else if (type === "list") stats.lists++;
+          else if (type === "table") stats.tables++;
+          else if (type === "image/diagram") stats.images++;
+          else stats.unknown++;
+        }
+      }
+
+      const pages = Array.from(pageMap.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([page, blocks]) => ({ page, blocks }));
+
+      const primary = records[0];
+
+      // Delete all fragmented records for this material
+      await ExtractedContent.deleteMany({ materialId: matId });
+
+      // Create the single consolidated document
+      await ExtractedContent.create({
+        materialId: matId,
+        projectId: primary.projectId,
+        userId: primary.userId,
+        pages,
+        totalPages: pages.length,
+        totalCharacters,
+        stats,
+        metadata: primary.metadata || {},
+      });
+
+      consolidatedCount++;
+    }
+
+    // Ensure indexes (specifically unique index on materialId)
+    await ExtractedContent.syncIndexes().catch((err) => {
+      console.warn(`[ExtractionService] Warning syncing indexes: ${err.message}`);
+    });
+
+    return { consolidatedCount, totalMaterials: distinctMaterials.length };
   }
 }
 

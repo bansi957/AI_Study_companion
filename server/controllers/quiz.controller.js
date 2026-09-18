@@ -7,7 +7,13 @@ const apiResponse = require("../utils/apiResponse");
  */
 const generateQuiz = async (req, res, next) => {
   try {
-    const { projectId, totalQuestions = 10, difficulty = "adaptive" } = req.body;
+    const {
+      projectId,
+      totalQuestions = 10,
+      difficulty = "adaptive",
+      conceptIds = [],
+      questionFormat = "mixed",
+    } = req.body;
 
     if (!projectId) {
       return apiResponse(res, 400, "Project ID is required");
@@ -20,6 +26,8 @@ const generateQuiz = async (req, res, next) => {
       projectId,
       totalQuestions,
       difficulty,
+      conceptIds,
+      questionFormat,
     });
 
     return apiResponse(res, 201, "Adaptive quiz generated successfully", quiz);

@@ -1,39 +1,7 @@
 const mongoose = require("mongoose");
 
-const extractedContentSchema = new mongoose.Schema(
+const blockSchema = new mongoose.Schema(
   {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-      index: true,
-    },
-
-    projectId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
-      required: true,
-      index: true,
-    },
-
-    materialId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Material",
-      required: true,
-      index: true,
-    },
-
-    pageNumber: {
-      type: Number,
-      required: true,
-      index: true,
-    },
-
-    segmentIndex: {
-      type: Number,
-      required: true,
-    },
-
     type: {
       type: String,
       enum: [
@@ -44,14 +12,69 @@ const extractedContentSchema = new mongoose.Schema(
         "image/diagram",
         "unknown",
       ],
-      required: true,
       default: "unknown",
+    },
+    text: {
+      type: String,
+      required: true,
+    },
+  },
+  { _id: false }
+);
+
+const pageSchema = new mongoose.Schema(
+  {
+    page: {
+      type: Number,
+      required: true,
+    },
+    blocks: [blockSchema],
+  },
+  { _id: false }
+);
+
+const extractedContentSchema = new mongoose.Schema(
+  {
+    materialId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Material",
+      required: true,
+    },
+
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
+      required: true,
       index: true,
     },
 
-    content: {
-      type: String,
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       required: true,
+      index: true,
+    },
+
+    pages: [pageSchema],
+
+    totalPages: {
+      type: Number,
+      default: 0,
+    },
+
+    totalCharacters: {
+      type: Number,
+      default: 0,
+    },
+
+    stats: {
+      headings: { type: Number, default: 0 },
+      paragraphs: { type: Number, default: 0 },
+      lists: { type: Number, default: 0 },
+      tables: { type: Number, default: 0 },
+      images: { type: Number, default: 0 },
+      unknown: { type: Number, default: 0 },
+      ocrPages: { type: Number, default: 0 },
     },
 
     metadata: {
@@ -64,9 +87,9 @@ const extractedContentSchema = new mongoose.Schema(
   }
 );
 
-// Compound indexes for efficient querying with guaranteed project/user isolation
-extractedContentSchema.index({ projectId: 1, materialId: 1, pageNumber: 1 });
-extractedContentSchema.index({ materialId: 1, segmentIndex: 1 });
+// Indexes: Strict 1-to-1 material mapping with unique index
+extractedContentSchema.index({ materialId: 1 }, { unique: true });
+extractedContentSchema.index({ projectId: 1, materialId: 1 });
 
 const ExtractedContent = mongoose.model("ExtractedContent", extractedContentSchema);
 

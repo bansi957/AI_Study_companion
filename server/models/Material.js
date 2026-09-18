@@ -105,6 +105,26 @@ const materialSchema = new mongoose.Schema(
   }
 );
 
+// Cascade delete associated Concept, ExtractedContent, and Chunk documents when a Material is deleted
+materialSchema.pre("findOneAndDelete", async function () {
+  try {
+    const filter = this.getFilter();
+    const materialId = filter._id || filter.id;
+    if (materialId) {
+      const Concept = mongoose.model("Concept");
+      const ExtractedContent = mongoose.model("ExtractedContent");
+      const Chunk = mongoose.model("Chunk");
+      await Promise.all([
+        Concept.deleteMany({ materialId }),
+        ExtractedContent.deleteMany({ materialId }),
+        Chunk.deleteMany({ materialId }),
+      ]);
+    }
+  } catch (err) {
+    console.warn(`[MaterialSchema] Pre-delete cascade warning: ${err.message}`);
+  }
+});
+
 const Material = mongoose.model("Material", materialSchema);
 
 module.exports = Material;

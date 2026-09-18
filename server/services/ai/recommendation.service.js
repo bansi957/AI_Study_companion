@@ -20,7 +20,7 @@ const llmService = require("./llm.service");
  */
 class RecommendationService {
   constructor() {
-    this.model = process.env.LLM_PRIMARY_MODEL || "openai/gpt-oss-120b";
+    this.model = process.env.LLM_MODEL || process.env.LLM_PRIMARY_MODEL || "openai/gpt-oss-120b";
   }
 
   getGroqClient() {
@@ -50,8 +50,22 @@ class RecommendationService {
       throw err;
     }
 
+    const knowledgeService = require("../documents/knowledge.service");
+
     // 2. Fetch all concepts for this project
-    const concepts = await Concept.find({ projectId }).lean();
+    let concepts = await knowledgeService.getConceptsByProject(projectId);
+    if (!concepts || concepts.length === 0) {
+      const generated = await knowledgeService.generateConceptsOnDemand({
+        projectId,
+        userId,
+      }).catch((err) => {
+        console.warn(`[RecommendationService] On-demand concept generation note: ${err.message}`);
+        return [];
+      });
+      if (generated && generated.length > 0) {
+        concepts = generated;
+      }
+    }
     if (!concepts || concepts.length === 0) {
       return [];
     }

@@ -11,6 +11,8 @@ import {
   ArrowRight,
   Sparkles,
 } from "lucide-react";
+import { useSelector } from "react-redux";
+import { selectUser } from "../../features/auth/authSlice";
 import {
   useGetSpaceByIdQuery,
   useUpdateSpaceMutation,
@@ -34,6 +36,8 @@ const PRESET_ICONS = ["📚", "🤖", "⚡", "📐", "🔬", "💻", "🧠", "�
 export const SpaceDetailPage = () => {
   const { spaceId } = useParams();
   const navigate = useNavigate();
+  const user = useSelector(selectUser);
+  const isAdmin = user?.role === "admin";
 
   // RTK Query — fetch space + projects in parallel
   const {
@@ -213,22 +217,20 @@ export const SpaceDetailPage = () => {
               Targeted study paths and knowledge materials
             </p>
           </div>
-          {projects.length > 0 && (
-            <Link to={`/projects/new?spaceId=${space._id}`}>
-              <Button variant="secondary" size="sm" icon={Plus}>
-                Add Project
-              </Button>
-            </Link>
-          )}
+          
         </div>
 
         {projects.length === 0 ? (
           <EmptyState
             icon={FolderKanban}
             title="No projects yet"
-            description="Create a focused learning journey inside this space with specific learning goals."
-            actionLabel="Create Project"
-            onAction={() => navigate(`/projects/new?spaceId=${space._id}`)}
+            description={
+              isAdmin
+                ? "No projects have been created in this space yet."
+                : "Create a focused learning journey inside this space with specific learning goals."
+            }
+            actionLabel={!isAdmin ? "Create Project" : undefined}
+            onAction={!isAdmin ? () => navigate(`/projects/new?spaceId=${space._id}`) : undefined}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -237,6 +239,7 @@ export const SpaceDetailPage = () => {
                 key={project._id}
                 hover
                 className="flex flex-col justify-between"
+                onClick={()=>navigate(`/projects/${project._id}`)}
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -277,17 +280,13 @@ export const SpaceDetailPage = () => {
 
                 <div className="pt-4 mt-4 border-t border-slate-800/70 flex items-center justify-between text-xs">
                   <span className="text-slate-500">Learning Path</span>
-                  <button
-                    onClick={() =>
-                      toast("Project workspace view will open in the next step.", {
-                        icon: "🚀",
-                      })
-                    }
+                  <Link
+                    to={`/projects/${project._id}`}
                     className="font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer"
                   >
-                    Open Project
+                    Open Workspace
                     <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
+                  </Link>
                 </div>
               </Card>
             ))}

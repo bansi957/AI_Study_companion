@@ -47,38 +47,36 @@ class RetrievalService {
         (idx) => idx.name === this.indexName
       );
 
+      const targetDimensions =
+        options.dimension || embeddingService.getDimension();
+
+      const indexDefinition = {
+        name: this.indexName,
+        type: "vectorSearch",
+        definition: {
+          fields: [
+            {
+              type: "vector",
+              path: "embedding",
+              numDimensions: targetDimensions,
+              similarity: options.similarity || this.similarityMetric,
+            },
+            {
+              type: "filter",
+              path: "projectId",
+            },
+            {
+              type: "filter",
+              path: "materialId",
+            },
+          ],
+        },
+      };
+
       if (!indexExists) {
         this.isIndexCreating = true;
-        // Dynamically resolve dimensions from embedding service or options (NOT hardcoded)
-        const dimensions =
-          options.dimension ||
-          embeddingService.getDimension();
-
-        const indexDefinition = {
-          name: this.indexName,
-          type: "vectorSearch",
-          definition: {
-            fields: [
-              {
-                type: "vector",
-                path: "embedding",
-                numDimensions: dimensions,
-                similarity: options.similarity || this.similarityMetric,
-              },
-              {
-                type: "filter",
-                path: "projectId",
-              },
-              {
-                type: "filter",
-                path: "materialId",
-              },
-            ],
-          },
-        };
-
         console.log(
-          `[RetrievalService] Initiating non-blocking creation of Atlas Vector Search index "${this.indexName}" (${dimensions} dims, ${this.similarityMetric})...`
+          `[RetrievalService] Initiating creation of Atlas Vector Search index "${this.indexName}" (${targetDimensions} dims, ${this.similarityMetric})...`
         );
 
         coll
@@ -92,10 +90,78 @@ class RetrievalService {
           .finally(() => {
             this.isIndexCreating = false;
           });
+      } else {
+        // Check if existing index dimensions match current embedding model
+        const existing = existingIndexes.find((idx) => idx.name === this.indexName);
+        const currentDim = existing?.latestDefinition?.fields?.find((f) => f.type === "vector")?.numDimensions;
+
+        if (currentDim && currentDim !== targetDimensions) {
+          console.log(
+            `[RetrievalService] Updating Atlas Vector Search index "${this.indexName}" from ${currentDim} to ${targetDimensions} dimensions...`
+          );
+          this.isIndexCreating = true;
+          coll
+            .updateSearchIndex(this.indexName, indexDefinition.definition)
+            .then(() => {
+              console.log(`[RetrievalService] Atlas Vector Search index update dispatched successfully`);
+            })
+            .catch((err) => {
+              console.warn(`[RetrievalService] Atlas Search index update failed: ${err.message}`);
+            })
+            .finally(() => {
+              this.isIndexCreating = false;
+            });
+        }
       }
     } catch (err) {
       console.warn(`[RetrievalService] ensureVectorIndex encountered warning: ${err.message}`);
       this.isIndexCreating = false;
+    }
+  }
+
+  /**
+   * Explicitly drop and recreate or update the Vector Search index for 384 dimensions
+   */
+  async recreateVectorIndex(dimension = 384) {
+    const coll = mongoose.connection.collection("chunks");
+    const targetDimensions = dimension || embeddingService.getDimension();
+    const indexDefinition = {
+      name: this.indexName,
+      type: "vectorSearch",
+      definition: {
+        fields: [
+          {
+            type: "vector",
+            path: "embedding",
+            numDimensions: targetDimensions,
+            similarity: this.similarityMetric,
+          },
+          {
+            type: "filter",
+            path: "projectId",
+          },
+          {
+            type: "filter",
+            path: "materialId",
+          },
+        ],
+      },
+    };
+
+    try {
+      const existingIndexes = await coll.listSearchIndexes().toArray();
+      const existing = existingIndexes.find((idx) => idx.name === this.indexName);
+      if (existing) {
+        await coll.updateSearchIndex(this.indexName, indexDefinition.definition);
+        console.log(`[RetrievalService] Updated Atlas Search index "${this.indexName}" to ${targetDimensions} dimensions`);
+      } else {
+        await coll.createSearchIndex(indexDefinition);
+        console.log(`[RetrievalService] Created Atlas Search index "${this.indexName}" with ${targetDimensions} dimensions`);
+      }
+      return { success: true, dimensions: targetDimensions };
+    } catch (err) {
+      console.warn(`[RetrievalService] recreateVectorIndex notice: ${err.message}`);
+      return { success: false, error: err.message };
     }
   }
 
@@ -147,6 +213,7 @@ class RetrievalService {
           text: 1,
           materialId: 1,
           projectId: 1,
+          page: 1,
           pages: 1,
           sourceSegments: 1,
           chunkIndex: 1,
@@ -157,9 +224,8 @@ class RetrievalService {
     ];
 
     const isDevFallbackAllowed =
-      allowDevFallback ||
-      (process.env.NODE_ENV === "development" &&
-        process.env.ENABLE_DEV_VECTOR_FALLBACK === "true");
+      allowDevFallback !== false ||
+      process.env.ENABLE_DEV_VECTOR_FALLBACK === "true";
 
     try {
       const results = await Chunk.aggregate(pipeline);
@@ -178,6 +244,7 @@ class RetrievalService {
         text: r.text,
         materialId: r.materialId,
         projectId: r.projectId,
+        page: r.page,
         pages: r.pages || [],
         sourceSegments: r.sourceSegments || [],
         chunkIndex: r.chunkIndex,
@@ -185,20 +252,15 @@ class RetrievalService {
         score: parseFloat((r.score || 0).toFixed(4)),
       }));
     } catch (vectorSearchError) {
-      if (isDevFallbackAllowed) {
-        console.warn(
-          `[RetrievalService] Atlas $vectorSearch unavailable (${vectorSearchError.message}). Using dev-mode fallback.`
-        );
-        return this.devModeCosineFallback({
-          projectId: projectObjectId,
-          queryEmbedding,
-          limit,
-          materialId: filterConditions.materialId,
-        });
-      }
-
-      // In production/standard mode, bubble up error
-      throw new Error(`MongoDB Vector Search failed: ${vectorSearchError.message}`);
+      console.warn(
+        `[RetrievalService] Atlas $vectorSearch unavailable (${vectorSearchError.message}). Falling back to project-scoped cosine calculation.`
+      );
+      return this.devModeCosineFallback({
+        projectId: projectObjectId,
+        queryEmbedding,
+        limit,
+        materialId: filterConditions.materialId,
+      });
     }
   }
 
@@ -215,20 +277,23 @@ class RetrievalService {
     const chunks = await Chunk.find(query).lean();
     if (!chunks || chunks.length === 0) return [];
 
-    const scored = chunks.map((c) => {
-      const score = this.calculateCosineSimilarity(queryEmbedding, c.embedding);
-      return {
-        _id: c._id,
-        text: c.text,
-        materialId: c.materialId,
-        projectId: c.projectId,
-        pages: c.pages || [],
-        sourceSegments: c.sourceSegments || [],
-        chunkIndex: c.chunkIndex,
-        metadata: c.metadata || {},
-        score: parseFloat(score.toFixed(4)),
-      };
-    });
+    const scored = chunks
+      .filter((c) => Array.isArray(c.embedding) && c.embedding.length === queryEmbedding.length)
+      .map((c) => {
+        const score = this.calculateCosineSimilarity(queryEmbedding, c.embedding);
+        return {
+          _id: c._id,
+          text: c.text,
+          materialId: c.materialId,
+          projectId: c.projectId,
+          page: c.page,
+          pages: c.pages || [],
+          sourceSegments: c.sourceSegments || [],
+          chunkIndex: c.chunkIndex,
+          metadata: c.metadata || {},
+          score: parseFloat(score.toFixed(4)),
+        };
+      });
 
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, limit);
@@ -315,83 +380,128 @@ class RetrievalService {
       };
     }
 
-    // 4. Resolve material titles for verified human-readable citations
+    // 4. Resolve material titles and file URLs for verified citations and PDF navigation
     const materialIds = [
       ...new Set(results.map((r) => String(r.materialId)).filter(Boolean)),
     ];
     const materials = await Material.find({ _id: { $in: materialIds } })
-      .select("originalName filename")
+      .select("originalName filename fileUrl")
       .lean();
     const materialMap = new Map(
       materials.map((m) => [String(m._id), m.originalName || m.filename || "Document"])
     );
+    const materialUrlMap = new Map(
+      materials.map((m) => [String(m._id), m.fileUrl || ""])
+    );
 
-    // 5. Enrich results with materialName
-    const enrichedResults = results.map((r) => ({
-      ...r,
-      materialName: materialMap.get(String(r.materialId)) || "Document",
-    }));
+    // 5. Build atomic source units deduplicated by unique document page (materialId + exactPage)
+    // Avoids presenting duplicate page blocks like [S1] Page 2 and [S2] Page 2 to the LLM
+    const sourceUnits = [];
+    const pageUnitMap = new Map();
 
-    // 6. Build LLM-ready RAG context
-    const context = this.buildRagContext(enrichedResults, materialMap);
+    for (const r of results) {
+      const matName = materialMap.get(String(r.materialId)) || "Document";
+      const fileUrl = materialUrlMap.get(String(r.materialId)) || "";
 
-    // 7. Verified citation metadata
-    const sources = enrichedResults.map((r) => ({
-      materialId: r.materialId,
-      materialName: r.materialName,
-      pages: r.pages,
-      chunkIndex: r.chunkIndex,
-      score: r.score,
-    }));
+      if (Array.isArray(r.sourceSegments) && r.sourceSegments.length > 1) {
+        // Multi-page chunk: inspect each page segment
+        for (const seg of r.sourceSegments) {
+          const segText = String(seg.text || "").trim();
+          if (!segText) continue;
+          const segPage = parseInt(seg.page, 10) || 1;
+          const pageKey = `${String(r.materialId)}_${segPage}`;
+
+          if (pageUnitMap.has(pageKey)) {
+            const existing = pageUnitMap.get(pageKey);
+            if (!existing.text.includes(segText)) {
+              existing.text = `${existing.text}\n\n${segText}`.slice(0, 1500);
+            }
+            if (r.score > existing.score) existing.score = r.score;
+          } else {
+            const unit = {
+              chunkId: r._id,
+              materialId: r.materialId,
+              materialName: matName,
+              fileUrl,
+              page: segPage,
+              text: segText,
+              chunkIndex: r.chunkIndex,
+              score: r.score,
+              segmentType: seg.segmentType || "paragraph",
+            };
+            pageUnitMap.set(pageKey, unit);
+            sourceUnits.push(unit);
+          }
+        }
+      } else {
+        // Single-page chunk: exact page comes from r.page
+        const exactPage = parseInt(r.page || (r.pages && r.pages[0]) || 1, 10);
+        const chunkText = String(r.text || "").trim();
+        const pageKey = `${String(r.materialId)}_${exactPage}`;
+
+        if (pageUnitMap.has(pageKey)) {
+          const existing = pageUnitMap.get(pageKey);
+          if (chunkText && !existing.text.includes(chunkText)) {
+            existing.text = `${existing.text}\n\n${chunkText}`.slice(0, 1500);
+          }
+          if (r.score > existing.score) existing.score = r.score;
+        } else {
+          const unit = {
+            chunkId: r._id,
+            materialId: r.materialId,
+            materialName: matName,
+            fileUrl,
+            page: exactPage,
+            text: chunkText,
+            chunkIndex: r.chunkIndex,
+            score: r.score,
+          };
+          pageUnitMap.set(pageKey, unit);
+          sourceUnits.push(unit);
+        }
+      }
+    }
+
+    // Assign unique sequential sourceId and human-readable citation to each exposed unit
+    sourceUnits.forEach((su, idx) => {
+      su.sourceId = `S${idx + 1}`;
+      su.citation = `${su.materialName} — Page ${su.page}`;
+    });
+
+    // 6. Build LLM-ready RAG context exposing each source segment separately
+    const context = this.buildRagContext(sourceUnits);
 
     return {
       query: query.trim(),
       topK,
-      results: enrichedResults,
+      results,
+      sourceUnits,
       context,
-      sources,
+      sources: sourceUnits.map((su) => ({
+        sourceId: su.sourceId,
+        materialId: su.materialId,
+        materialName: su.materialName,
+        page: su.page,
+        fileUrl: su.fileUrl,
+        citation: su.citation,
+        chunkIndex: su.chunkIndex,
+        score: su.score,
+        sourceExcerpt: su.text.slice(0, 300),
+      })),
     };
   }
 
   /**
-   * Convert retrieved chunks into LLM-ready context with exact page citations
+   * Convert exposed source units into LLM-ready context with exact page citations
    *
-   * @param {Array<Object>} chunks - Retrieved chunk objects
-   * @param {Map<string, string>} materialMap - Material ID to filename mapping
+   * @param {Array<Object>} sourceUnits - Exposed source unit objects
    * @returns {string} Formatted context block
    */
-  buildRagContext(chunks, materialMap = new Map()) {
-    if (!chunks || chunks.length === 0) return "";
+  buildRagContext(sourceUnits) {
+    if (!sourceUnits || sourceUnits.length === 0) return "";
 
-    const contextBlocks = chunks.map((chunk, idx) => {
-      const sourceNum = idx + 1;
-      const matName =
-        chunk.materialName ||
-        materialMap.get(String(chunk.materialId)) ||
-        "Document";
-      const pagesStr =
-        chunk.pages && chunk.pages.length > 0
-          ? chunk.pages.join(", ")
-          : "N/A";
-
-      // If sourceSegments are available with granular page mappings, format per segment
-      if (chunk.sourceSegments && chunk.sourceSegments.length > 1) {
-        const segmentsText = chunk.sourceSegments
-          .map((seg) => `[Page ${seg.page}]\n${seg.text.trim()}`)
-          .join("\n\n");
-
-        return `SOURCE ${sourceNum}
-Material: ${matName}
-Page(s): ${pagesStr}
-Content:
-${segmentsText}`;
-      }
-
-      return `SOURCE ${sourceNum}
-Material: ${matName}
-Page(s): ${pagesStr}
-Content:
-${String(chunk.text || "").trim()}`;
+    const contextBlocks = sourceUnits.map((su) => {
+      return `[${su.sourceId}] ${su.materialName} — Page ${su.page}\n"${su.text}"`;
     });
 
     return contextBlocks.join("\n\n---\n\n");
