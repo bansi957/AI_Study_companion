@@ -344,6 +344,18 @@ class TutorService {
 
         const citation = `${su.materialName || "Document"} — Page ${exactPage}`;
 
+        // Infer heading/section from su.heading or text content if not explicitly populated
+        let heading = su.heading || su.chapterTitle || "";
+        if (!heading && su.text) {
+          const lines = su.text.split("\n").map((l) => l.trim()).filter(Boolean);
+          for (const line of lines.slice(0, 3)) {
+            if (/^(?:#+|chapter\s+\d+|section\s+\d+|part\s+[ivx\d]+|[0-9]+(?:\.[0-9]+)+\s+)/i.test(line)) {
+              heading = line.replace(/^#+\s*/, "");
+              break;
+            }
+          }
+        }
+
         verifiedSources.push({
           id: su.sourceId || `S${citationIndex}`,
           sourceId: su.sourceId || `S${citationIndex}`,
@@ -353,6 +365,9 @@ class TutorService {
           page: exactPage,
           fileUrl: su.fileUrl || "",
           citation,
+          heading: heading || "General Section",
+          chapterTitle: su.chapterTitle || "",
+          sectionHeading: su.sectionHeading || "",
           sourceExcerpt: (su.text || "").slice(0, 300),
           chunkId: su.chunkId,
         });

@@ -27,10 +27,30 @@ export const analyticsApi = createApi({
         { type: "ProjectGrowth", id: projectId },
       ],
     }),
+
+    getGlobalAnalytics: builder.query({
+      query: () => ({
+        url: "/analytics/global",
+        method: "GET",
+      }),
+      transformResponse: (response) => response?.data ?? null,
+      providesTags: ["GlobalAnalytics"],
+    }),
+
+    getUserActivity: builder.query({
+      query: (limit = 10) => ({
+        url: `/activity?limit=${limit}`,
+        method: "GET",
+      }),
+      transformResponse: (response) => response?.data?.activities ?? [],
+      providesTags: ["UserActivity"],
+    }),
   }),
 });
 
 export const {
   useGetProjectAnalyticsQuery,
   useGetProjectGrowthQuery,
+  useGetGlobalAnalyticsQuery,
+  useGetUserActivityQuery,
 } = analyticsApi;

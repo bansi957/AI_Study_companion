@@ -29,13 +29,7 @@ export const LandingPage = () => {
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Link to="/login">
-              <Button variant="primary" size="sm">
-                Continue with Google
-              </Button>
-            </Link>
-          </div>
+         
         </div>
       </header>
 

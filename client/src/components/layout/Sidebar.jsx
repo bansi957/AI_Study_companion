@@ -39,7 +39,6 @@ export const Sidebar = ({ onClose }) => {
   const navItems = isAdmin
     ? [
         { label: "Dashboard", path: "/admin", icon: Compass },
-        { label: "Spaces", path: "/spaces", icon: FolderClosed },
       ]
     : [
         { label: "Home", path: "/home", icon: Compass },
@@ -103,13 +102,13 @@ export const Sidebar = ({ onClose }) => {
             })}
           </div>
 
-          {/* Created Spaces List */}
-          <div className="space-y-1 pt-1 border-t border-slate-800/60">
-            <div className="flex items-center justify-between px-3 pt-3 mb-2">
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Your Spaces
-              </p>
-              {!isAdmin && (
+          {/* Created Spaces List — hidden for admins */}
+          {!isAdmin && (
+            <div className="space-y-1 pt-1 border-t border-slate-800/60">
+              <div className="flex items-center justify-between px-3 pt-3 mb-2">
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Your Spaces
+                </p>
                 <NavLink
                   to="/spaces/new"
                   onClick={onClose}
@@ -118,39 +117,39 @@ export const Sidebar = ({ onClose }) => {
                 >
                   <Plus className="w-3.5 h-3.5" />
                 </NavLink>
-              )}
-            </div>
+              </div>
 
-            <div className="space-y-0.5">
-              {spacesLoading ? (
-                <div className="px-3 py-2 text-xs text-slate-500 animate-pulse">
-                  Loading spaces...
-                </div>
-              ) : spaces.length === 0 ? (
-                <p className="px-3 py-1.5 text-xs text-slate-500 italic">
-                  No spaces created yet
-                </p>
-              ) : (
-                spaces.map((space) => (
-                  <NavLink
-                    key={space._id}
-                    to={`/spaces/${space._id}`}
-                    onClick={onClose}
-                    className={({ isActive }) =>
-                      `flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-150 group ${
-                        isActive
-                          ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/25 font-semibold"
-                          : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/80 border border-transparent"
-                      }`
-                    }
-                  >
-                    <span className="text-sm flex-shrink-0">{space.icon || "📁"}</span>
-                    <span className="truncate flex-1">{space.name}</span>
-                  </NavLink>
-                ))
-              )}
+              <div className="space-y-0.5">
+                {spacesLoading ? (
+                  <div className="px-3 py-2 text-xs text-slate-500 animate-pulse">
+                    Loading spaces...
+                  </div>
+                ) : spaces.length === 0 ? (
+                  <p className="px-3 py-1.5 text-xs text-slate-500 italic">
+                    No spaces created yet
+                  </p>
+                ) : (
+                  spaces.map((space) => (
+                    <NavLink
+                      key={space._id}
+                      to={`/spaces/${space._id}`}
+                      onClick={onClose}
+                      className={({ isActive }) =>
+                        `flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-150 group ${
+                          isActive
+                            ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/25 font-semibold"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/80 border border-transparent"
+                        }`
+                      }
+                    >
+                      <span className="text-sm flex-shrink-0">{space.icon || "📁"}</span>
+                      <span className="truncate flex-1">{space.name}</span>
+                    </NavLink>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 

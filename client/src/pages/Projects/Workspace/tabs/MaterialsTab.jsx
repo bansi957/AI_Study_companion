@@ -130,9 +130,9 @@ export const MaterialsTab = ({
     setSelectedFile(file);
 
     try {
-      toast.loading("Uploading to cloud storage...", { id: "upload-toast" });
+      toast.loading("Uploading...", { id: "upload-toast" });
       await uploadMaterial({ file, projectId }).unwrap();
-      toast.success("PDF uploaded! Processing queued.", { id: "upload-toast" });
+      toast.success("PDF uploaded! Processing started.", { id: "upload-toast" });
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       handleRefresh?.();
@@ -234,10 +234,12 @@ export const MaterialsTab = ({
 
           <div>
             <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
-              {isUploading ? "Uploading & Storing to Cloudinary..." : "Upload Learning Material"}
+              {isUploading ? "Uploading..." : "Upload Learning Material"}
             </h3>
             <p className="text-xs sm:text-sm text-slate-400 mt-1">
-              Drag & drop your PDF file here, or click to browse
+              {isUploading
+                ? "Please wait while your document is being uploaded..."
+                : "Drag & drop your PDF file here, or click to browse"}
             </p>
           </div>
 
@@ -246,7 +248,7 @@ export const MaterialsTab = ({
             <span>•</span>
             <span>PDF format only</span>
             <span>•</span>
-            <span>Cloud encrypted</span>
+            <span>Auto-indexed</span>
           </div>
         </div>
       </div>

@@ -23,6 +23,8 @@ import {
   MessageSquare,
   Clock,
   Target,
+  Search,
+  X as XIcon,
 } from "lucide-react";
 import {
   useGenerateQuizMutation,
@@ -60,6 +62,7 @@ export const QuizTab = ({
   const [questionFormat, setQuestionFormat] = useState("mixed"); // "mixed" | "mcq" | "open-ended"
   const [conceptSelectionMode, setConceptSelectionMode] = useState("all"); // "all" | "selected"
   const [selectedConceptIds, setSelectedConceptIds] = useState(new Set());
+  const [conceptSearch, setConceptSearch] = useState("");
 
   // Active Quiz State
   const [activeQuiz, setActiveQuiz] = useState(null);
@@ -105,6 +108,14 @@ export const QuizTab = ({
       (c) => c.category === "requiringAttention" || (c.currentScore !== undefined && c.currentScore < 50)
     );
   }, [allConcepts]);
+
+  const filteredConcepts = useMemo(() => {
+    const q = conceptSearch.trim().toLowerCase();
+    if (!q) return allConcepts;
+    return allConcepts.filter((c) =>
+      (c.conceptName || "").toLowerCase().includes(q)
+    );
+  }, [allConcepts, conceptSearch]);
 
   // Concept selection handlers
   const handleToggleConcept = (conceptId) => {
@@ -467,6 +478,7 @@ export const QuizTab = ({
                   {/* Concept Checkboxes when mode === 'selected' */}
                   {conceptSelectionMode === "selected" && (
                     <div className="space-y-2 pt-1 animate-fade-in">
+                      {/* Header row: label + select/clear actions */}
                       <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
                         <span>Choose specific concepts to target:</span>
                         <div className="flex gap-3">
@@ -487,13 +499,40 @@ export const QuizTab = ({
                         </div>
                       </div>
 
+                      {/* Search Input */}
+                      {allConcepts.length > 0 && (
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={conceptSearch}
+                            onChange={(e) => setConceptSearch(e.target.value)}
+                            placeholder={`Search ${allConcepts.length} concept${allConcepts.length === 1 ? "" : "s"}...`}
+                            className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-800/60 border border-slate-700/70 text-slate-200 placeholder-slate-500 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                          />
+                          {conceptSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setConceptSearch("")}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                            >
+                              <XIcon className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+
                       {allConcepts.length === 0 ? (
                         <div className="p-4 rounded-xl bg-slate-800/30 border border-slate-800 text-center text-xs text-slate-400">
                           No concepts extracted yet. The quiz will generate questions directly from your study materials.
                         </div>
+                      ) : filteredConcepts.length === 0 ? (
+                        <div className="p-4 rounded-xl bg-slate-800/30 border border-slate-800 text-center text-xs text-slate-400">
+                          No concepts match <span className="text-slate-200 font-medium">&quot;{conceptSearch}&quot;</span>. Try a different keyword.
+                        </div>
                       ) : (
                         <div className="max-h-60 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                          {allConcepts.map((concept) => {
+                          {filteredConcepts.map((concept) => {
                             const cidStr = concept.conceptId.toString();
                             const isSelected = selectedConceptIds.has(cidStr);
                             const score = concept.currentScore ?? 0;

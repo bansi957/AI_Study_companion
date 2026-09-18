@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import { normalizeMathNotation } from "../../../../utils/mathUtils";
 import {
   Sparkles,
   Send,
@@ -238,6 +241,7 @@ export const TutorTab = ({
     if (!content) return null;
 
     const cleaned = cleanMarkdownContent(content);
+    const mathNormalized = normalizeMathNotation(cleaned);
 
     // Defensive deduplication of sources by unique document page
     const uniqueSources = [];
@@ -257,12 +261,13 @@ export const TutorTab = ({
       citationMap.set(num, s);
     });
 
-    const prepared = prepareMarkdownWithCitations(cleaned, citationMap);
+    const prepared = prepareMarkdownWithCitations(mathNormalized, citationMap);
 
     return (
       <div className="markdown-body text-slate-200 text-sm">
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeKatex]}
           components={{
             p: ({ children }) => (
               <p className="mb-3 last:mb-0 leading-relaxed text-slate-200 text-sm">
@@ -643,7 +648,7 @@ export const TutorTab = ({
                       </div>
                     )}
 
-                    {/* Sources / Citations List (Deduplicated by unique document page) */}
+                    {/* Sources / Citations List (Hierarchically grouped: Document/Heading -> Page) */}
                     {!isUser && (() => {
                       const uniqueSources = [];
                       const seenPageKeys = new Set();
@@ -658,71 +663,107 @@ export const TutorTab = ({
 
                       if (uniqueSources.length === 0) return null;
 
+                      // 1. Order displayed sources according to document hierarchy and page order (not arbitrary retrieval order)
+                      const sortedSources = [...uniqueSources].sort((a, b) => {
+                        const matA = a.materialName || "";
+                        const matB = b.materialName || "";
+                        if (matA !== matB) return matA.localeCompare(matB);
+                        const pageA = parseInt(a.page || (a.pages && a.pages[0]) || 1, 10);
+                        const pageB = parseInt(b.page || (b.pages && b.pages[0]) || 1, 10);
+                        return pageA - pageB;
+                      });
+
+                      // 2. Group related citations under relevant main heading/subheading when possible
+                      const groupedByHeading = new Map();
+                      sortedSources.forEach((src) => {
+                        const headingTitle = src.heading || src.chapterTitle || "Document References";
+                        if (!groupedByHeading.has(headingTitle)) {
+                          groupedByHeading.set(headingTitle, []);
+                        }
+                        groupedByHeading.get(headingTitle).push(src);
+                      });
+
                       return (
-                        <div className="pt-2 space-y-1.5">
+                        <div className="pt-2 space-y-2">
                           <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>Grounded Page Citations ({uniqueSources.length})</span>
+                            <span>Grounded Page Citations ({sortedSources.length})</span>
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
-                            {uniqueSources.map((src, sIdx) => {
-                              const isExpanded = expandedSources[`${mIdx}-${sIdx}`];
-                              const pageNumber = src.page || (src.pages && src.pages[0]) || 1;
-                              const citationNum = src.citationIndex || (src.id ? src.id.replace(/^S/i, "") : sIdx + 1);
-                              const matName = src.materialName || src.filename || "Document";
-
-                              return (
-                                <div
-                                  key={sIdx}
-                                  className="w-full bg-slate-800/50 border border-slate-700/60 rounded-xl p-2.5 text-xs text-slate-300 transition-all hover:border-indigo-500/50"
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    {/* Clickable Citation Link */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenPdf(src)}
-                                      title={`Click to open ${matName} at Page ${pageNumber}`}
-                                      className="flex items-center gap-2 overflow-hidden text-left group hover:text-white transition-colors flex-1 min-w-0 cursor-pointer"
-                                    >
-                                      <span className="w-5 h-5 rounded-md bg-indigo-950/80 border border-indigo-700/50 text-indigo-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
-                                        {citationNum}
-                                      </span>
-                                      <FileText className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0 group-hover:text-indigo-300" />
-                                      <span className="font-medium text-slate-200 truncate group-hover:text-indigo-200">
-                                        {matName}
-                                      </span>
-                                      <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-slate-900/80 text-indigo-300 border-indigo-700/40 group-hover:border-indigo-500/60 flex-shrink-0">
-                                        Page {pageNumber}
-                                      </Badge>
-                                      <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-indigo-300 transition-colors flex-shrink-0" />
-                                    </button>
-
-                                    {src.sourceExcerpt && (
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleSourceExpand(mIdx, sIdx)}
-                                        className="text-slate-400 hover:text-indigo-300 flex items-center gap-1 text-[11px] font-medium flex-shrink-0 ml-2 cursor-pointer"
-                                        title="Toggle supporting text excerpt"
-                                      >
-                                        <span>Excerpt</span>
-                                        {isExpanded ? (
-                                          <ChevronUp className="w-3.5 h-3.5" />
-                                        ) : (
-                                          <ChevronDown className="w-3.5 h-3.5" />
-                                        )}
-                                      </button>
-                                    )}
-                                  </div>
-
-                                  {isExpanded && src.sourceExcerpt && (
-                                    <div className="mt-2 p-2.5 rounded-lg bg-slate-900/90 border border-slate-700/60 text-slate-300 font-mono text-[11px] leading-relaxed">
-                                      "{src.sourceExcerpt}"
-                                    </div>
-                                  )}
+                          <div className="space-y-2">
+                            {Array.from(groupedByHeading.entries()).map(([heading, groupSources], gIdx) => (
+                              <div
+                                key={gIdx}
+                                className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 text-xs text-slate-300 space-y-2"
+                              >
+                                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-300">
+                                  <BookOpen className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+                                  <span className="truncate">{heading}</span>
                                 </div>
-                              );
-                            })}
+
+                                <div className="space-y-1.5 pl-2 border-l border-slate-700/80">
+                                  {groupSources.map((src, sIdx) => {
+                                    const origIdx = uniqueSources.indexOf(src);
+                                    const isExpanded = expandedSources[`${mIdx}-${origIdx}`];
+                                    const pageNumber = src.page || (src.pages && src.pages[0]) || 1;
+                                    const citationNum =
+                                      src.citationIndex || (src.id ? src.id.replace(/^S/i, "") : origIdx + 1);
+                                    const matName = src.materialName || src.filename || "Document";
+
+                                    return (
+                                      <div key={sIdx} className="space-y-1.5">
+                                        <div className="flex items-center justify-between gap-2">
+                                          {/* Clickable Citation Link */}
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenPdf(src)}
+                                            title={`Click to open ${matName} at Page ${pageNumber}`}
+                                            className="flex items-center gap-2 overflow-hidden text-left group hover:text-white transition-colors flex-1 min-w-0 cursor-pointer"
+                                          >
+                                            <span className="w-5 h-5 rounded-md bg-indigo-950/90 border border-indigo-700/60 text-indigo-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0 shadow-xs">
+                                              {citationNum}
+                                            </span>
+                                            <FileText className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0 group-hover:text-indigo-300" />
+                                            <span className="font-medium text-slate-200 truncate group-hover:text-indigo-200">
+                                              {matName}
+                                            </span>
+                                            <Badge
+                                              variant="outline"
+                                              className="text-[10px] py-0 px-1.5 bg-slate-900/90 text-indigo-300 border-indigo-700/50 group-hover:border-indigo-500/70 flex-shrink-0"
+                                            >
+                                              Page {pageNumber}
+                                            </Badge>
+                                            <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-indigo-300 transition-colors flex-shrink-0" />
+                                          </button>
+
+                                          {src.sourceExcerpt && (
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleSourceExpand(mIdx, origIdx)}
+                                              className="text-slate-400 hover:text-indigo-300 flex items-center gap-1 text-[11px] font-medium flex-shrink-0 ml-2 cursor-pointer"
+                                              title="Toggle supporting text excerpt"
+                                            >
+                                              <span>Excerpt</span>
+                                              {isExpanded ? (
+                                                <ChevronUp className="w-3.5 h-3.5" />
+                                              ) : (
+                                                <ChevronDown className="w-3.5 h-3.5" />
+                                              )}
+                                            </button>
+                                          )}
+                                        </div>
+
+                                        {isExpanded && src.sourceExcerpt && (
+                                          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-700/60 text-slate-300 font-mono text-[11px] leading-relaxed">
+                                            "{src.sourceExcerpt}"
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       );
@@ -833,46 +874,6 @@ export const TutorTab = ({
           </div>
         </div>
 
-        {/* Indexed Materials Quick-List */}
-        <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg backdrop-blur-sm">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">
-              Source Documents ({readyMaterials.length})
-            </h4>
-            <button
-              onClick={() => onSwitchTab?.("materials")}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
-            >
-              Manage
-            </button>
-          </div>
-
-          {readyMaterials.length === 0 ? (
-            <p className="text-xs text-slate-500 italic py-2">
-              No ready materials. Go to Materials tab to upload.
-            </p>
-          ) : (
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-              {readyMaterials.map((mat) => (
-                <div
-                  key={mat._id}
-                  className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/50 text-xs"
-                >
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <FileText className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-                    <span className="text-slate-300 truncate font-medium">
-                      {mat.title || mat.originalName}
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-500 flex-shrink-0 ml-2">
-                    {mat.totalPages || 1}p
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* Previous Chat Sessions */}
         {conversations.length > 0 && (
           <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg backdrop-blur-sm">
@@ -924,6 +925,46 @@ export const TutorTab = ({
             </div>
           </div>
         )}
+
+        {/* Indexed Materials Quick-List */}
+        <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg backdrop-blur-sm">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">
+              Source Documents ({readyMaterials.length})
+            </h4>
+            <button
+              onClick={() => onSwitchTab?.("materials")}
+              className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
+            >
+              Manage
+            </button>
+          </div>
+
+          {readyMaterials.length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-2">
+              No ready materials. Go to Materials tab to upload.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {readyMaterials.map((mat) => (
+                <div
+                  key={mat._id}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/50 text-xs"
+                >
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <FileText className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                    <span className="text-slate-300 truncate font-medium">
+                      {mat.title || mat.originalName}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 flex-shrink-0 ml-2">
+                    {mat.totalPages || 1}p
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Learning Mastery Indicator */}
         <div className="bg-gradient-to-br from-indigo-950/40 to-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg">

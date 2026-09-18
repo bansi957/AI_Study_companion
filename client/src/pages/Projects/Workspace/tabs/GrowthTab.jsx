@@ -112,7 +112,54 @@ export const GrowthTab = ({
         </div>
       </div>
 
-      {/* 2. Three Classification Columns */}
+      {/* 2. Prominent Next Step Recommendation (Data-Driven from Learner Signals) */}
+      {growth?.nextStep && (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-violet-950/60 via-slate-900 to-indigo-950/60 border border-violet-500/30 p-5 sm:p-6 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-violet-600/20 border border-violet-500/40 flex items-center justify-center text-violet-300 flex-shrink-0 shadow-lg shadow-violet-950/40">
+                <BrainCircuit className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                    {growth.nextStep.title}
+                  </h3>
+                  <Badge variant="primary" size="sm" className="bg-violet-950/80 text-violet-300 border-violet-700/60">
+                    {growth.nextStep.badge || "Recommended Action"}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                  {growth.nextStep.description}
+                </p>
+                {growth.nextStep.reason && (
+                  <p className="text-[11px] text-slate-400 italic">
+                    Why: {growth.nextStep.reason}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-shrink-0">
+              <Button
+                variant="primary"
+                size="md"
+                icon={ArrowRight}
+                onClick={() => onSwitchTab?.(growth.nextStep.action || "tutor")}
+                className="w-full sm:w-auto justify-center bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-600/30 whitespace-nowrap text-xs"
+              >
+                {growth.nextStep.action === "quiz"
+                  ? "Take Focused Quiz"
+                  : growth.nextStep.action === "materials"
+                  ? "Upload Material"
+                  : "Review with Tutor"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Three Classification Columns */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Improving */}
         <div className="bg-slate-900/80 rounded-2xl border border-emerald-500/20 p-5 shadow-lg flex flex-col backdrop-blur-sm">

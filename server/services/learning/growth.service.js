@@ -160,6 +160,64 @@ class GrowthService {
 
     const averageMastery = assessedCount > 0 ? Math.round(totalScoreSum / assessedCount) : 0;
 
+    // 4. Compute data-driven Next Step recommendation
+    let nextStep = null;
+    if (concepts.length === 0) {
+      nextStep = {
+        type: "upload_material",
+        action: "materials",
+        title: "Upload Study Materials",
+        description: "Add a PDF document to extract concepts, generate embeddings, and unlock grounded AI tutoring.",
+        reason: "No learning materials or target concepts exist yet for this project.",
+        badge: "Initial Step",
+        priority: 1,
+      };
+    } else if (requiringAttention.length > 0) {
+      const target = requiringAttention[0];
+      nextStep = {
+        type: "review_weak_concept",
+        action: "tutor",
+        title: `Review Weak Concept: ${target.conceptName}`,
+        description: `Your mastery in "${target.conceptName}" is at ${target.currentScore}%. Review foundational definitions and explanations with the AI Tutor.`,
+        reason: target.reason || "Concept requires retention reinforcement based on recent evaluation.",
+        targetConcept: target.conceptName,
+        badge: "Weak Area",
+        priority: 2,
+      };
+    } else if (unassessed.length > 0) {
+      const target = unassessed[0];
+      nextStep = {
+        type: "take_focused_quiz",
+        action: "quiz",
+        title: `Evaluate "${target.conceptName}" in a Quiz`,
+        description: `You have ${unassessed.length} unassessed concept${unassessed.length === 1 ? "" : "s"}. Take an adaptive quiz to baseline your knowledge and track growth.`,
+        reason: "Unassessed target concept ready for evaluation.",
+        targetConcept: target.conceptName,
+        badge: "Recommended",
+        priority: 3,
+      };
+    } else if (averageMastery >= 75) {
+      nextStep = {
+        type: "challenge_quiz",
+        action: "quiz",
+        title: "Take a Comprehensive Challenge Quiz",
+        description: `Great progress! You have achieved an average mastery of ${averageMastery}%. Test your full retention across all project concepts.`,
+        reason: "High mastery achieved across all assessed concepts.",
+        badge: "Mastery Challenge",
+        priority: 4,
+      };
+    } else {
+      nextStep = {
+        type: "deepen_understanding",
+        action: "tutor",
+        title: "Deepen Concept Comprehension with Tutor",
+        description: "Engage in an interactive pedagogical session with your AI Tutor to strengthen conceptual connections.",
+        reason: "Steady learning progression underway.",
+        badge: "Next Step",
+        priority: 5,
+      };
+    }
+
     return {
       projectId: project._id,
       projectName: project.name,
@@ -173,6 +231,7 @@ class GrowthService {
         requiringAttentionCount: requiringAttention.length,
         unassessedCount: unassessed.length,
       },
+      nextStep,
       improving,
       stable,
       requiringAttention,

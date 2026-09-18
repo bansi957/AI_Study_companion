@@ -118,12 +118,15 @@ class AnalyticsService {
     ] = await Promise.all([
       Material.find({ projectId: pId, userId: uId }).lean(),
       Quiz.countDocuments({ projectId: pId, userId: uId }),
-      QuizAttempt.find({ projectId: pId, userId: uId, completed: true }).lean(),
+      QuizAttempt.find({ projectId: pId, userId: uId, completed: true })
+        .populate("quizId", "difficulty totalQuestions questions selectionReason")
+        .sort({ completedAt: -1, createdAt: -1 })
+        .lean(),
       Assessment.find({ projectId: pId, userId: uId }).lean(),
       knowledgeService.getConceptsByProject(pId),
       Mastery.find({ projectId: pId, userId: uId }).lean(),
       MasteryHistory.find({ projectId: pId, userId: uId }).sort({ createdAt: 1 }).lean(),
-      Activity.find({ projectId: pId, userId: uId }).sort({ createdAt: -1 }).limit(50).lean(),
+      Activity.find({ projectId: pId, userId: uId }).sort({ createdAt: -1 }).limit(100).lean(),
       growthService.getProjectGrowth({ userId, projectId }).catch(() => null),
     ]);
 
@@ -136,6 +139,144 @@ class AnalyticsService {
     const quizAttemptsCount = quizAttempts.length;
     const quizTotalScore = quizAttempts.reduce((sum, a) => sum + (Number(a.score) || 0), 0);
     const averageQuizScore = quizAttemptsCount > 0 ? Math.round(quizTotalScore / quizAttemptsCount) : 0;
+
+    // Quiz Questions Accuracy (Real answered questions)
+    let totalQuestionsAnswered = 0;
+    let correctQuestionsCount = 0;
+    let incorrectQuestionsCount = 0;
+
+    for (const qa of quizAttempts) {
+      if (Array.isArray(qa.answers)) {
+        for (const ans of qa.answers) {
+          totalQuestionsAnswered++;
+          if (ans.isCorrect === true) {
+            correctQuestionsCount++;
+          } else if (ans.isCorrect === false) {
+            incorrectQuestionsCount++;
+          } else if (typeof ans.score === "number" && ans.score >= 0.7) {
+            correctQuestionsCount++;
+          } else {
+            incorrectQuestionsCount++;
+          }
+        }
+      }
+    }
+
+    // Recent Quizzes with detail
+    const recentQuizzes = quizAttempts.slice(0, 10).map((qa, index) => {
+      const quizObj = qa.quizId;
+      const questionsCount =
+        qa.answers?.length || quizObj?.totalQuestions || quizObj?.questions?.length || 5;
+      const scoreVal = typeof qa.score === "number" ? Math.round(qa.score) : 0;
+
+      let quizName = `Quiz Attempt #${quizAttemptsCount - index}`;
+      if (
+        quizObj?.selectionReason &&
+        typeof quizObj.selectionReason === "string" &&
+        quizObj.selectionReason.length > 3 &&
+        !quizObj.selectionReason.includes("{")
+      ) {
+        quizName = quizObj.selectionReason.replace(/^Adaptive quiz on /i, "").slice(0, 45);
+      } else if (quizObj?.difficulty) {
+        quizName = `${quizObj.difficulty.charAt(0).toUpperCase() + quizObj.difficulty.slice(1)} Practice Quiz`;
+      }
+
+      let indicator = "medium";
+      let indicatorLabel = "Proficient";
+      if (scoreVal >= 75) {
+        indicator = "high";
+        indicatorLabel = "Strong";
+      } else if (scoreVal < 50) {
+        indicator = "low";
+        indicatorLabel = "Needs Review";
+      }
+
+      return {
+        id: qa._id,
+        quizId: quizObj?._id || qa.quizId,
+        quizName,
+        score: scoreVal,
+        date: qa.completedAt || qa.createdAt,
+        totalQuestions: questionsCount,
+        indicator,
+        indicatorLabel,
+      };
+    });
+
+    // Quiz Score Trend over time (chronological)
+    const quizScoreTrend = [...quizAttempts].reverse().map((qa, i) => ({
+      attemptNumber: i + 1,
+      date: qa.completedAt || qa.createdAt
+        ? new Date(qa.completedAt || qa.createdAt).toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric",
+          })
+        : `Quiz ${i + 1}`,
+      score: Math.round(Number(qa.score) || 0),
+      quizName: qa.quizId?.selectionReason ? qa.quizId.selectionReason.slice(0, 25) : `Quiz ${i + 1}`,
+    }));
+
+    // Daily Activity by Day (last 14 days) & Streak calculation
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const activityDayMap = new Map();
+    for (const a of activities) {
+      if (a.createdAt) {
+        const key = this.formatDateKey(a.createdAt);
+        activityDayMap.set(key, (activityDayMap.get(key) || 0) + 1);
+      }
+    }
+
+    const activityByDay = [];
+    const today = new Date();
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(today.getDate() - i);
+      const key = this.formatDateKey(d);
+      const count = activityDayMap.get(key) || 0;
+      activityByDay.push({
+        date: key,
+        dayName: dayNames[d.getDay()],
+        displayDate: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        count,
+        level: count === 0 ? 0 : count <= 2 ? 1 : count <= 5 ? 2 : 3,
+      });
+    }
+
+    // Real active day streak
+    let streakDays = 0;
+    let checkDate = new Date();
+    const todayKey = this.formatDateKey(checkDate);
+    if (!activityDayMap.has(todayKey) || activityDayMap.get(todayKey) === 0) {
+      checkDate.setDate(checkDate.getDate() - 1);
+    }
+    while (true) {
+      const k = this.formatDateKey(checkDate);
+      if (activityDayMap.has(k) && activityDayMap.get(k) > 0) {
+        streakDays++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    // Study / Activity Distribution
+    const typeCounts = {
+      Tutor: 0,
+      Quizzes: 0,
+      Materials: 0,
+      Assessments: 0,
+    };
+    for (const a of activities) {
+      const t = a.type || "";
+      if (t.includes("TUTOR")) typeCounts.Tutor++;
+      else if (t.includes("QUIZ")) typeCounts.Quizzes++;
+      else if (t.includes("MATERIAL") || t.includes("DOCUMENT")) typeCounts.Materials++;
+      else if (t.includes("ASSESSMENT")) typeCounts.Assessments++;
+    }
+    const activityDistribution = Object.entries(typeCounts).map(([name, count]) => ({
+      name,
+      count,
+    }));
 
     // Assessment metrics
     const totalAssessments = assessments.length;
@@ -158,6 +299,46 @@ class AnalyticsService {
     const stableConceptsCount = growthData?.summary?.stableCount || 0;
     const attentionConceptsCount = growthData?.summary?.requiringAttentionCount || 0;
 
+    // Concept breakdown & Mastery distribution
+    const masteryMap = new Map();
+    masteries.forEach((m) => masteryMap.set(m.conceptId.toString(), m));
+
+    let masteredCount = 0;
+    let proficientCount = 0;
+    let developingCount = 0;
+    let attentionCount = 0;
+    let unassessedConceptsCount = 0;
+
+    const conceptsBreakdown = concepts.map((c) => {
+      const m = masteryMap.get(c._id.toString());
+      const score = m ? m.score : 0;
+      if (!m) {
+        unassessedConceptsCount++;
+      } else {
+        if (score >= 80) masteredCount++;
+        else if (score >= 60) proficientCount++;
+        else if (score >= 40) developingCount++;
+        else attentionCount++;
+      }
+
+      return {
+        conceptId: c._id,
+        name: c.name,
+        importance: c.importance || 3,
+        score,
+        confidence: m ? m.confidence : 0,
+        lastEvidence: m ? m.lastEvidence : null,
+      };
+    });
+
+    const masteryDistribution = [
+      { name: "Mastered (80%+)", count: masteredCount, color: "#10b981" },
+      { name: "Proficient (60–79%)", count: proficientCount, color: "#6366f1" },
+      { name: "Developing (40–59%)", count: developingCount, color: "#8b5cf6" },
+      { name: "Needs Attention (<40%)", count: attentionCount, color: "#f59e0b" },
+      { name: "Unassessed", count: unassessedConceptsCount, color: "#64748b" },
+    ];
+
     // Recent activity within 7 days
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const recentActivityCount = activities.filter((a) => new Date(a.createdAt) >= sevenDaysAgo).length;
@@ -173,22 +354,6 @@ class AnalyticsService {
       metadata: a.metadata || {},
       createdAt: a.createdAt,
     }));
-
-    // Concept breakdown
-    const masteryMap = new Map();
-    masteries.forEach((m) => masteryMap.set(m.conceptId.toString(), m));
-
-    const conceptsBreakdown = concepts.map((c) => {
-      const m = masteryMap.get(c._id.toString());
-      return {
-        conceptId: c._id,
-        name: c.name,
-        importance: c.importance || 3,
-        score: m ? m.score : 0,
-        confidence: m ? m.confidence : 0,
-        lastEvidence: m ? m.lastEvidence : null,
-      };
-    });
 
     return {
       projectId: project._id,
@@ -208,12 +373,22 @@ class AnalyticsService {
         stableConceptsCount,
         attentionConceptsCount,
         recentActivityCount,
+        streakDays,
+        correctQuestionsCount,
+        incorrectQuestionsCount,
+        totalQuestionsAnswered,
       },
       assessmentPerformance: {
         total: totalAssessments,
         evaluated: evaluatedAssessments.length,
         averageScore: averageAssessmentScore,
       },
+      nextStep: growthData?.nextStep || null,
+      recentQuizzes,
+      quizScoreTrend,
+      activityByDay,
+      activityDistribution,
+      masteryDistribution,
       masteryTrend,
       activityTrend,
       recentActivityTimeline,

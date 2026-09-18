@@ -234,82 +234,178 @@ export const OverviewTab = ({
 
         {/* Right Column (1 Col) */}
         <div className="space-y-6">
-          {/* Recommended Next Action */}
-          <Card className="p-5 space-y-3.5 border-violet-900/30 bg-gradient-to-b from-slate-900/90 to-slate-950/90">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-violet-950 border border-violet-700/60 flex items-center justify-center text-violet-400">
-                <BrainCircuit className="w-4 h-4" />
+          {/* Next Step Recommendation (Data-driven from Growth) */}
+          <Card className="p-5 space-y-3.5 border-violet-900/30 bg-gradient-to-b from-slate-900/90 to-slate-950/90 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-violet-950 border border-violet-700/60 flex items-center justify-center text-violet-400">
+                  <BrainCircuit className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Next Step Recommendation</h4>
+                  <p className="text-[11px] text-slate-400">Personalized learning suggestion</p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-white">Recommended Action</h4>
-                <p className="text-[11px] text-slate-400">AI Next Step</p>
-              </div>
+              {(growth?.nextStep?.badge || analytics?.nextStep?.badge) && (
+                <Badge variant="primary" size="sm" className="bg-violet-950 text-violet-300 border-violet-700/60 text-[10px]">
+                  {growth?.nextStep?.badge || analytics?.nextStep?.badge}
+                </Badge>
+              )}
             </div>
 
-            <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
-              <p className="text-xs text-slate-300 leading-relaxed">
-                {readyMaterials.length === 0
-                  ? "Upload your first study material to build knowledge embeddings for this project."
-                  : (growth?.summary?.requiringAttentionCount ?? 0) > 0
-                  ? "Take a targeted adaptive quiz focusing on concepts that require attention."
-                  : "Ask the AI Tutor questions grounded in your uploaded documents to deepen comprehension."}
-              </p>
+            {(() => {
+              const rec = growth?.nextStep || analytics?.nextStep;
+              if (rec) {
+                return (
+                  <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2.5">
+                    <div>
+                      <p className="text-xs font-semibold text-white">{rec.title}</p>
+                      <p className="text-[11px] text-slate-300 leading-relaxed mt-1">
+                        {rec.description}
+                      </p>
+                      {rec.reason && (
+                        <p className="text-[10px] text-slate-400 italic mt-1">
+                          Why: {rec.reason}
+                        </p>
+                      )}
+                    </div>
 
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() =>
-                  readyMaterials.length === 0
-                    ? onSwitchTab("materials")
-                    : (growth?.summary?.requiringAttentionCount ?? 0) > 0
-                    ? onSwitchTab("quiz")
-                    : onSwitchTab("tutor")
-                }
-                className="w-full justify-center text-xs mt-1 bg-violet-600 hover:bg-violet-500"
-              >
-                {readyMaterials.length === 0
-                  ? "Upload Material"
-                  : (growth?.summary?.requiringAttentionCount ?? 0) > 0
-                  ? "Practice Weak Concepts"
-                  : "Start AI Session"}
-              </Button>
-            </div>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => onSwitchTab(rec.action || "tutor")}
+                      className="w-full justify-center text-xs mt-1 bg-violet-600 hover:bg-violet-500 text-white shadow-md shadow-violet-600/30"
+                    >
+                      {rec.action === "quiz"
+                        ? "Take Focused Quiz"
+                        : rec.action === "materials"
+                        ? "Upload Material"
+                        : "Review with Tutor"}
+                    </Button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {readyMaterials.length === 0
+                      ? "Upload your first study material to build knowledge embeddings for this project."
+                      : "Start a focused session with the AI Tutor grounded in your project documents."}
+                  </p>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => onSwitchTab(readyMaterials.length === 0 ? "materials" : "tutor")}
+                    className="w-full justify-center text-xs mt-1 bg-violet-600 hover:bg-violet-500 text-white shadow-md shadow-violet-600/30"
+                  >
+                    {readyMaterials.length === 0 ? "Upload Material" : "Ask AI Tutor"}
+                  </Button>
+                </div>
+              );
+            })()}
           </Card>
 
-          {/* Recent Activity Feed */}
-          <Card className="p-5 space-y-3.5 border-slate-800/80 bg-slate-900/60">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700/60 flex items-center justify-center text-slate-300">
-                <ActivityIcon className="w-4 h-4" />
+          {/* Recent Quizzes Section (Replaces Recent Activity) */}
+          <Card className="p-5 space-y-3.5 border-slate-800/80 bg-slate-900/60 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-950/80 border border-indigo-700/60 flex items-center justify-center text-indigo-400">
+                  <Award className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Recent Quizzes</h4>
+                  <p className="text-[11px] text-slate-400">Performance on latest attempts</p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-white">Recent Activity</h4>
-                <p className="text-[11px] text-slate-400">Project event log</p>
-              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onSwitchTab("quiz")}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
+              >
+                Take Quiz →
+              </Button>
             </div>
 
-            {recentActivities.length === 0 ? (
-              <p className="text-xs text-slate-500 italic py-2">No activity recorded yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {recentActivities.slice(0, 5).map((act, idx) => (
-                  <div
-                    key={act.id || idx}
-                    className="p-2.5 rounded-lg bg-slate-950/50 border border-slate-800/70 flex items-start gap-2.5"
-                  >
-                    <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-slate-200 truncate">
-                        {act.type.replace(/_/g, " ")}
-                      </p>
-                      <p className="text-[10px] text-slate-500">
-                        {act.createdAt ? new Date(act.createdAt).toLocaleString() : "Recent"}
-                      </p>
-                    </div>
+            {(() => {
+              const recentQuizzes = analytics?.recentQuizzes || [];
+              if (recentQuizzes.length === 0) {
+                return (
+                  <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800/80 text-center space-y-2">
+                    <Award className="w-6 h-6 text-slate-600 mx-auto" />
+                    <p className="text-xs font-semibold text-slate-300">No quiz attempts yet</p>
+                    <p className="text-[11px] text-slate-400">
+                      Take your first adaptive quiz to test concept mastery and track improvement over time.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onSwitchTab("quiz")}
+                      className="mt-1 text-xs border-indigo-700/50 text-indigo-300 hover:bg-indigo-950/40"
+                    >
+                      Start Quiz
+                    </Button>
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              }
+
+              return (
+                <div className="space-y-2.5">
+                  {recentQuizzes.slice(0, 4).map((quiz) => {
+                    const isHigh = quiz.score >= 75;
+                    const isLow = quiz.score < 50;
+                    const badgeVariant = isHigh ? "success" : isLow ? "danger" : "primary";
+                    const formattedDate = quiz.date
+                      ? new Date(quiz.date).toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                        })
+                      : "Recent";
+
+                    return (
+                      <div
+                        key={quiz.id}
+                        className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between gap-3 hover:border-slate-700 transition-colors"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="text-xs font-semibold text-slate-200 truncate">
+                            {quiz.quizName}
+                          </p>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                            <span>{quiz.totalQuestions} questions</span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-slate-500" />
+                              {formattedDate}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <div className="text-right">
+                            <span
+                              className={`text-sm font-bold ${
+                                isHigh
+                                  ? "text-emerald-400"
+                                  : isLow
+                                  ? "text-amber-400"
+                                  : "text-indigo-300"
+                              }`}
+                            >
+                              {quiz.score}%
+                            </span>
+                          </div>
+                          <Badge variant={badgeVariant} size="sm">
+                            {quiz.indicatorLabel || (isHigh ? "Strong" : isLow ? "Review" : "Good")}
+                          </Badge>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </Card>
         </div>
       </div>
