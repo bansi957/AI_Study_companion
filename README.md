@@ -82,50 +82,74 @@ Create Space
 
 ```
 AI_Study_Companion/
-├── client/                               # Frontend Single-Page Application
+├── client/                               # Frontend Single-Page Application (React 19 + Vite)
 │   ├── public/                           # Static assets, logos, and favicons
 │   ├── src/
-│   │   ├── app/                          # Redux store configuration
-│   │   ├── components/                   # UI library, layout components, and modals
-│   │   ├── features/                     # RTK Query API slice definitions
-│   │   ├── pages/                        # Landing, Auth, Spaces, Projects, Admin
-│   │   ├── services/                     # Axios client, Firebase auth, Socket.io
-│   │   ├── utils/                        # Math & formatting utilities
-│   │   ├── App.jsx                       # Root routing & layout
-│   │   └── main.jsx                      # Entrypoint
-│   ├── .env.example                      # Client environment template
-│   ├── package.json
-│   └── vite.config.js
+│   │   ├── app/                          # Redux store setup (store.js)
+│   │   ├── assets/                       # Illustrations, diagrams, and hero assets
+│   │   ├── components/                   # Reusable components
+│   │   │   ├── common/                   # Route guards (ProtectedRoute, AdminRoute, LearnerOnlyRoute) & headers
+│   │   │   ├── layout/                   # Core application layout shells (AppLayout, Sidebar, TopNav)
+│   │   │   └── ui/                       # Design system primitives (Button, Card, Modal, Badge, Select, etc.)
+│   │   ├── features/                     # RTK Query API slices
+│   │   │   ├── admin/                    # Admin statistics & user inspection queries
+│   │   │   ├── analytics/                # Learning analytics & telemetry queries
+│   │   │   ├── auth/                     # Authentication mutations & state slice
+│   │   │   ├── materials/                # Material upload, processing & extraction queries
+│   │   │   ├── projects/                 # Study project queries and mutations
+│   │   │   ├── quiz/                     # Adaptive quiz generation & rubric submission queries
+│   │   │   ├── spaces/                   # Academic space queries and mutations
+│   │   │   └── tutor/                    # Grounded RAG AI tutor chat queries
+│   │   ├── pages/                        # View controllers & tab layouts
+│   │   │   ├── Admin/                    # AdminDashboardPage & UserDetailsModal
+│   │   │   ├── Auth/                     # LoginPage & RegisterPage
+│   │   │   ├── Home/                     # User dashboard & overview
+│   │   │   ├── Landing/                  # Public landing & feature showcase
+│   │   │   ├── Projects/                 # Project workspace view & sub-tabs
+│   │   │   │   └── Workspace/tabs/       # OverviewTab, MaterialsTab, TutorTab, QuizTab, AnalyticsTab, GrowthTab
+│   │   │   └── Spaces/                   # SpacesPage, SpaceDetailPage, CreateSpacePage
+│   │   ├── services/                     # Network clients (Axios base query, Firebase SDK, Socket.IO)
+│   │   ├── utils/                        # KaTeX math renderers & formatting helpers
+│   │   ├── App.jsx                       # Master client router & route guards
+│   │   ├── index.css                     # Tailwind CSS directives & theme design tokens
+│   │   └── main.jsx                      # Client application DOM mount
+│   ├── .env.example                      # Client environment variables template
+│   ├── index.html                        # HTML5 document entrypoint
+│   ├── package.json                      # Client dependencies & scripts
+│   └── vite.config.js                    # Vite bundler configuration
 │
-├── server/                               # Backend REST API & Workers
-│   ├── config/                           # DB, Redis, Cloudinary, Firebase, Socket.io
-│   ├── controllers/                      # Route request handlers
-│   ├── middleware/                       # Auth, Admin role verification, Uploads
-│   ├── models/                           # Mongoose schemas (15 models)
-│   ├── queues/                           # BullMQ queue initializers
-│   ├── routes/                           # Express route declarations
-│   ├── services/
-│   │   ├── ai/                           # Groq LLM, Tutor, Quiz, Recommendations
-│   │   ├── analytics/                    # Admin analytics, Activity logging
-│   │   ├── documents/                    # PDF parsing, OCR, Chunking, Knowledge
-│   │   ├── learning/                     # Mastery calculation, Growth history
-│   │   └── retrieval/                    # Cohere embedding service & Atlas search
-│   ├── utils/                            # Cascade deletion, JWT, API response helpers
-│   ├── workers/                          # BullMQ worker processors & runner
-│   ├── server.js                         # Main Express application entrypoint
-│   ├── .env.example                      # Server environment template
-│   └── package.json
+├── server/                               # Backend REST API & Background Workers (Node.js + Express)
+│   ├── config/                           # Integrations (MongoDB, Redis, Cloudinary, Firebase, Socket.IO)
+│   ├── controllers/                      # HTTP request controllers (13 modules: auth, tutor, quiz, spaces, etc.)
+│   ├── middleware/                       # Auth token verification, Admin role check, Multer, Joi validator, Error handlers
+│   ├── models/                           # Mongoose data models (15 schemas: User, Space, Project, Material, Chunk, etc.)
+│   ├── queues/                           # BullMQ queue declarations (document.queue.js, learning.queue.js)
+│   ├── routes/                           # Express route definitions (13 modular routes matching controllers)
+│   ├── services/                         # Business logic & AI pipelines
+│   │   ├── ai/                           # Groq LLM orchestration, Tutor RAG, Adaptive Quiz, Recommendations
+│   │   ├── analytics/                    # Platform usage, token tracking, audit trails & activity telemetry
+│   │   ├── documents/                    # PDF extraction, Tesseract OCR, Semantic chunking, Concept mapping
+│   │   ├── learning/                     # Mastery calculation, Memory retention decay, Growth tracking
+│   │   └── retrieval/                    # Cohere Embed v4.0 vector embeddings & MongoDB Atlas Vector Search
+│   ├── utils/                            # Cascade deletion, JWT token signing, API response helpers, Logger
+│   ├── validators/                       # Joi request validation schemas (auth, material, project, quiz, space)
+│   ├── workers/                          # BullMQ background workers (document, embedding, extraction, knowledge, learning)
+│   │   └── runWorkers.js                 # Standalone decoupled worker runner
+│   ├── eng.traineddata                   # Tesseract OCR English language dataset
+│   ├── server.js                         # Main Express application & Socket.IO server entrypoint
+│   ├── .env.example                      # Server environment variables template
+│   └── package.json                      # Server dependencies & scripts
 │
-├── docs/                                 # Technical & Architectural Documentation
-│   ├── architecture.md                   # Detailed system & pipeline architecture
-│   ├── ai-usage.md                       # AI models, RAG specs, and token tracking
-│   ├── development-prompts.md            # System prompts & grounding templates
-│   ├── testing.md                        # Testing checklists & verification suite
-│   └── deployment.md                     # Production infrastructure & Render setup
+├── docs/                                 # Architectural & Technical Documentation
+│   ├── architecture.md                   # System topology, data flow diagrams & component specs
+│   ├── ai-usage.md                       # LLM strategy, Cohere vector configurations & token tracking
+│   ├── development-prompts.md            # System prompts, grounding guidelines & rubric criteria
+│   ├── testing.md                        # Verification procedures & test checklists
+│   └── deployment.md                     # Cloud infrastructure deployment runbook (Render, Atlas, Redis)
 │
 ├── .env.example                          # Monorepo unified environment template
-├── .gitignore                            # Comprehensive git exclusion rules
-└── README.md                             # Project overview & evaluator guide
+├── .gitignore                            # Git exclusion rules
+└── README.md                             # Primary project documentation & architecture overview
 ```
 
 ---
