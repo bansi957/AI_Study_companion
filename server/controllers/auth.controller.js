@@ -18,6 +18,12 @@ const formatUserResponse = (user) => ({
 
 const register = async (req, res, next) => {
   try {
+    // Check MongoDB connection readiness to prevent unhandled buffering timeouts
+    if (mongoose.connection.readyState !== 1) {
+      return apiResponse(res, 503, "Database service is temporarily unavailable. Please retry shortly.");
+    }
+
+
     const { name, email, password } = req.body || {};
 
     const validation = validateRegisterInput({ name, email, password });
